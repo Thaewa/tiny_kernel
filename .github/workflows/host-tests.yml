@@ -1,0 +1,42 @@
+name: Host Tests
+
+# Run portable kernel tests for every pushed revision, every pull request,
+# and whenever a developer starts the workflow manually from GitHub.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  # The workflow only needs permission to read the repository source.
+  contents: read
+
+jobs:
+  binary-semaphore:
+    name: Binary Semaphore
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download the exact source revision associated with this workflow run.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Compile the production semaphore module together with the host test
+      # runner. Strict warnings keep portable C issues visible in CI.
+      - name: Build host tests
+        run: |
+          mkdir -p build/host-tests
+          gcc \
+            -std=c11 \
+            -Wall \
+            -Wextra \
+            -Werror \
+            -pedantic \
+            -IInc \
+            Src/osSemaphore.c \
+            tests/host/test_binary_semaphore.c \
+            -o build/host-tests/test_binary_semaphore
+
+      # A failed assertion exits non-zero and marks this job as failed.
+      - name: Run host tests
+        run: build/host-tests/test_binary_semaphore
