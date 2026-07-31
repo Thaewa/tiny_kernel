@@ -143,6 +143,8 @@ The goals of Tiny Kernel are to:
 
 ## License
 
-No license has been selected yet. Until a license is added, the source remains
-under the author's default copyright and should not be assumed to be open
-source.
+Original Tiny Kernel source code is licensed under the MIT License.
+See [LICENSE](LICENSE) for details.
+
+Third-party CMSIS and STM32 device files remain subject to their respective
+licenses and copyright notices.
