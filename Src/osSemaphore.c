@@ -1,4 +1,6 @@
 #include "osSemaphore.h"
+#include "osKernelInternal.h"
+#include "osPort.h"
 
 /*-----------------------------------------------------------
  * osBinSemInit
@@ -25,4 +27,48 @@ void osBinSemInit(osBinSem *sem, int32_t initial)
 {
 	/* Clamp the requested value to the binary range of zero or one. */
 	sem->value = (initial > 0) ? 1 : 0;
+}
+
+/*-----------------------------------------------------------
+ * osBinSemTake
+ *
+ * Acquires a binary semaphore for the calling thread. Shared
+ * semaphore and thread state is protected by a kernel critical
+ * section so a concurrent thread or interrupt cannot observe a
+ * partially completed operation.
+ *
+ * If the semaphore is available, the signal is consumed and the
+ * function returns immediately. If it is unavailable, the kernel
+ * marks the current thread as blocked before a context switch is
+ * requested.
+ *
+ * The port layer hides Cortex-M interrupt and memory-barrier
+ * instructions from this portable synchronization module. Host
+ * tests replace that layer with fakes that record each operation.
+ *----------------------------------------------------------*/
+void osBinSemTake(osBinSem *sem)
+{
+	/* Preserve the caller's interrupt-mask state before entering. */
+	osIrqState irqState = osPortEnterCritical();
+
+	/* Consume an available binary signal without blocking. */
+	if (sem->value > 0)
+	{
+		sem->value = 0;
+
+		/* Publish the semaphore update before leaving the section. */
+		osPortMemoryBarrier();
+		osPortExitCritical(irqState);
+		return;
+	}
+
+	/* Record the wait relationship while kernel state is protected. */
+	osKernelBlockCurrentOnSemaphore(sem);
+
+	/* Publish the blocked state before scheduling another thread. */
+	osPortMemoryBarrier();
+	osPortExitCritical(irqState);
+
+	/* Context switching is requested only after interrupts are restored. */
+	osKernelRequestContextSwitch();
 }

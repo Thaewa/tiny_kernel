@@ -1,6 +1,7 @@
 /* osKernel.c */
 
 #include "osKernel.h"
+#include "osKernelInternal.h"
 #include "cmsis_gcc.h"
 
 //#define NUM_OF_THREADS			3
@@ -497,47 +498,29 @@ void osBinSemGive(osBinSem *sem)
 }
 
 /*-----------------------------------------------------------
- * osBinSemTake
+ * osKernelBlockCurrentOnSemaphore
  *
- * Acquires (takes) a binary semaphore.
- * If the semaphore is available, it consumes it immediately.
- * If not, the current thread is blocked and context switch is requested.
+ * Provides the synchronization subsystem with a narrow internal
+ * service for blocking the current thread. Keeping TCB access in
+ * the kernel prevents semaphore code from depending directly on
+ * the scheduler's private data structures.
  *----------------------------------------------------------*/
-void osBinSemTake(osBinSem *sem)
+void osKernelBlockCurrentOnSemaphore(osBinSem *sem)
 {
-    /* Disable interrupts to protect semaphore state */
-    __disable_irq();
+	currentPt->state = THREAD_BLOCKED;
+	currentPt->waitSem = sem;
+}
 
-    /* If the semaphore is currently available */
-    if (sem->value > 0)
-    {
-        /* Consume it (set to 0 for binary semaphore) */
-        sem->value -= 1;
-
-        /* Ensure memory consistency after modification */
-        __DMB();
-
-        /* Re-enable interrupts before returning */
-        __enable_irq();
-
-        /* Semaphore successfully acquired, no blocking needed */
-        return;
-    }
-
-    /* Otherwise, block the current thread */
-    currentPt->state   = THREAD_BLOCKED;
-
-    /* Record which semaphore it is waiting on */
-    currentPt->waitSem = sem;
-
-    /* Ensure task state update is visible before enabling interrupts */
-    __DMB();
-
-    /* Re-enable interrupts */
-    __enable_irq();
-
-    /* Yield CPU to allow another thread to run (scheduler decides next) */
-    osYield();
+/*-----------------------------------------------------------
+ * osKernelRequestContextSwitch
+ *
+ * Provides a portable scheduling request to synchronization
+ * primitives. The current Cortex-M implementation delegates to
+ * osYield(); a later milestone will route this request to PendSV.
+ *----------------------------------------------------------*/
+void osKernelRequestContextSwitch(void)
+{
+	osYield();
 }
 
 /*-----------------------------------------------------------
