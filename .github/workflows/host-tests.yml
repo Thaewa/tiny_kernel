@@ -33,7 +33,10 @@ jobs:
             -Werror \
             -pedantic \
             -IInc \
+            -Itests/host/fakes \
             Src/osSemaphore.c \
+            tests/host/fakes/fake_os_kernel.c \
+            tests/host/fakes/fake_os_port.c \
             tests/host/test_binary_semaphore.c \
             -o build/host-tests/test_binary_semaphore
 
