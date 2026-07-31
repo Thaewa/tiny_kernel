@@ -1,0 +1,28 @@
+# STM32CubeIDE build output
+/Debug/
+/Release/
+/build/
+/out/
+
+# Compiled and generated artifacts outside build directories
+*.o
+*.obj
+*.d
+*.su
+*.cyclo
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Eclipse workspace metadata (project metadata remains tracked)
+.metadata/
+
+# Editor and operating-system files
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
