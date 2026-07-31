@@ -2,6 +2,8 @@
 #include <stdlib.h>
 
 #include "osSemaphore.h"
+#include "fake_os_kernel.h"
+#include "fake_os_port.h"
 
 /* Number of assertions that completed successfully in this test process. */
 static unsigned int tests_run;
@@ -38,6 +40,31 @@ static void expect_value(const char *test_name,
 	if (sem->value != expected)
 	{
 		fail(test_name, expected, sem->value);
+	}
+
+	printf("PASS: %s\n", test_name);
+}
+
+/*-----------------------------------------------------------
+ * expect_count
+ *
+ * Checks an unsigned fake-service call count or saved state.
+ * Separate value and count helpers keep diagnostics readable
+ * without introducing an external unit-test framework.
+ *----------------------------------------------------------*/
+static void expect_count(const char *test_name,
+						 uint32_t expected,
+						 uint32_t actual)
+{
+	tests_run++;
+	if (actual != expected)
+	{
+		fprintf(stderr,
+				"FAIL: %s (expected %lu, got %lu)\n",
+				test_name,
+				(unsigned long)expected,
+				(unsigned long)actual);
+		exit(EXIT_FAILURE);
 	}
 
 	printf("PASS: %s\n", test_name);
@@ -89,6 +116,43 @@ static void test_init_clamps_negative_value(void)
 	expect_value("BS-04 clamp negative value", 0, &sem);
 }
 
+/*-----------------------------------------------------------
+ * BS-05: Taking an available semaphore succeeds immediately.
+ *
+ * Besides checking the value transition from one to zero, this
+ * test verifies the interaction contract around the portable
+ * logic: the critical section is balanced, the saved interrupt
+ * state is restored, and no block or context-switch request is
+ * issued on the successful fast path.
+ *----------------------------------------------------------*/
+static void test_take_available(void)
+{
+	osBinSem sem;
+
+	/* Start each interaction test with empty fake call histories. */
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	osBinSemInit(&sem, 1);
+
+	/* Exercise the production implementation compiled for the host. */
+	osBinSemTake(&sem);
+
+	expect_value("BS-05 available take consumes signal", 0, &sem);
+	expect_count("BS-05 enters critical section", 1U,
+				 fakeOsPortEnterCriticalCallCount());
+	expect_count("BS-05 exits critical section", 1U,
+				 fakeOsPortExitCriticalCallCount());
+	expect_count("BS-05 executes memory barrier", 1U,
+				 fakeOsPortMemoryBarrierCallCount());
+	expect_count("BS-05 restores saved interrupt state",
+				 FAKE_OS_PORT_SAVED_IRQ_STATE,
+				 fakeOsPortLastRestoredIrqState());
+	expect_count("BS-05 does not block current thread", 0U,
+				 fakeOsKernelBlockCallCount());
+	expect_count("BS-05 does not request context switch", 0U,
+				 fakeOsKernelContextSwitchCallCount());
+}
+
 int main(void)
 {
 	/* Execute the initialization contract tests in plan order. */
@@ -96,6 +160,7 @@ int main(void)
 	test_init_unavailable();
 	test_init_clamps_positive_value();
 	test_init_clamps_negative_value();
+	test_take_available();
 
 	/* Returning success makes the CI job green when every check passes. */
 	printf("All %u binary semaphore host tests passed.\n", tests_run);
