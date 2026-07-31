@@ -65,12 +65,13 @@ void task3(void)
 int main(void)
 {
 
+	/*Initialize gpio*/
 	gpio_init ();
 
     /*Initialize uart*/
 	uart_tx_init();
 
-    /*Initializr hardware timer*/
+    /*Initialize hardware timer*/
 	tim2_1Khz_interrupt_init();
 
 	/*Initialize semaphores*/
