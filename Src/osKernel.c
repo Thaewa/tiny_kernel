@@ -456,18 +456,6 @@ void tim2_1Khz_interrupt_init(void)
 }
 
 /*-----------------------------------------------------------
- * osBinSemInit
- *
- * Initializes a binary semaphore with the given initial value.
- * Any positive value is treated as 1 (available),
- * and zero or negative as 0 (unavailable).
- *----------------------------------------------------------*/
-void osBinSemInit(osBinSem *sem, int32_t initial)
-{
-	sem->value = (initial > 0) ? 1 : 0;
-}
-
-/*-----------------------------------------------------------
  * osBinSemGive
  *
  * Releases (gives) a binary semaphore.
