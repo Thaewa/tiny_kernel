@@ -72,3 +72,36 @@ void osBinSemTake(osBinSem *sem)
 	/* Context switching is requested only after interrupts are restored. */
 	osKernelRequestContextSwitch();
 }
+
+/*-----------------------------------------------------------
+ * osBinSemGive
+ *
+ * Releases a binary semaphore inside a protected critical
+ * section. When a waiter exists, the signal is handed directly
+ * to exactly one blocked thread and the stored semaphore value
+ * remains zero. Without a waiter, the signal is stored as one.
+ * Repeated gives therefore coalesce instead of growing a count.
+ *
+ * A context switch is requested only for direct handoff so the
+ * newly readied thread can participate in scheduling promptly.
+ *----------------------------------------------------------*/
+void osBinSemGive(osBinSem *sem)
+{
+	osIrqState irqState = osPortEnterCritical();
+	bool waiterUnblocked = osKernelUnblockOneOnSemaphore(sem);
+
+	if (!waiterUnblocked)
+	{
+		/* A binary semaphore stores at most one pending signal. */
+		sem->value = 1;
+	}
+
+	/* Publish either the stored signal or the direct handoff state. */
+	osPortMemoryBarrier();
+	osPortExitCritical(irqState);
+
+	if (waiterUnblocked)
+	{
+		osKernelRequestContextSwitch();
+	}
+}

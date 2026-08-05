@@ -109,30 +109,6 @@ void osKernelTick(void)
 }
 
 /*-----------------------------------------------------------
- * has_waiter
- *
- * Checks if any thread is blocked and waiting on the given semaphore.
- * Returns 1 if a waiter exists, otherwise 0.
- *----------------------------------------------------------*/
-static inline int has_waiter(osBinSem *sem)
-{
-	/* Scan all threads to find one waiting on this semaphore */
-	for(int i = 0; i < thread_count; i++)
-	{
-		/* Check blocked state and semaphore match */
-		if((tcbs[i].state   == THREAD_BLOCKED) &&
-		   (tcbs[i].waitSem ==            sem))
-		{
-			/* Found a waiting thread */
-			return 1;
-		}
-	}
-
-	/* No waiting thread found */
-	return 0;
-}
-
-/*-----------------------------------------------------------
  * osThreadStackInit
  *
  * Initializes the stack for a new thread.
@@ -397,30 +373,27 @@ void osScheduler(void)
 }
 
 /*-----------------------------------------------------------
- * osUnblockOne
+ * osKernelUnblockOneOnSemaphore
  *
- * Scans through all threads and unblocks the first thread
- * that is waiting on the specified binary semaphore.
- * Sets its state back to READY and clears the waitSem pointer.
+ * Scans the kernel's TCB storage and wakes the first thread
+ * blocked on the supplied semaphore. The boolean result lets a
+ * synchronization primitive distinguish direct handoff from
+ * storing an available signal without inspecting private TCBs.
  *----------------------------------------------------------*/
-static void osUnblockOne(osBinSem *sem)
+bool osKernelUnblockOneOnSemaphore(osBinSem *sem)
 {
-    for(int i = 0; i < thread_count; i++)
-    {
-        /* Check if the thread is blocked and waiting on this semaphore */
-        if ((tcbs[i].state   == THREAD_BLOCKED) &&
-        	(tcbs[i].waitSem ==            sem))
-        {
-            /* Mark the thread as READY to run again */
-            tcbs[i].state = THREAD_READY;
+	for(int i = 0; i < thread_count; i++)
+	{
+		if ((tcbs[i].state == THREAD_BLOCKED) &&
+			(tcbs[i].waitSem == sem))
+		{
+			tcbs[i].state = THREAD_READY;
+			tcbs[i].waitSem = 0;
+			return true;
+		}
+	}
 
-            /* Clear the semaphore wait pointer */
-            tcbs[i].waitSem = 0;
-
-            /* Stop after unblocking one thread */
-            break;
-        }
-    }
+	return false;
 }
 
 /*-----------------------------------------------------------
@@ -454,47 +427,6 @@ void tim2_1Khz_interrupt_init(void)
 
 	/*Enable timer*/
 	TIM2->CR1 =  CR1_CEN;
-}
-
-/*-----------------------------------------------------------
- * osBinSemGive
- *
- * Releases (gives) a binary semaphore.
- * If there are threads waiting on this semaphore,
- * it unblocks one of them and yields the CPU immediately.
- * Otherwise, it simply marks the semaphore as available.
- *----------------------------------------------------------*/
-void osBinSemGive(osBinSem *sem)
-{
-    /* Disable interrupts to enter critical section */
-    __disable_irq();
-
-    /* Check if there is any task waiting for this semaphore */
-    if (has_waiter(sem))
-    {
-        /* Unblock one waiting thread */
-        osUnblockOne(sem);
-
-        /* Ensure memory operations (semaphore state) complete before context switch */
-        __DMB();
-
-        /* Re-enable interrupts before yielding */
-        __enable_irq();
-
-        /* Trigger scheduler to switch context to the unblocked task */
-        osYield();
-    }
-    else
-    {
-        /* No waiter: mark semaphore as available (binary semaphore = 1) */
-        sem->value = 1;
-
-        /* Memory barrier to make the new value visible to other cores/ISRs */
-        __DMB();
-
-        /* Re-enable interrupts and exit critical section */
-        __enable_irq();
-    }
 }
 
 /*-----------------------------------------------------------
