@@ -218,6 +218,109 @@ static void test_take_unavailable_blocks(void)
 				 fakeOsKernelContextSwitchCallCount());
 }
 
+/*-----------------------------------------------------------
+ * BS-07: Giving with no waiter stores one available signal.
+ *
+ * The kernel unblock service must still be queried while the
+ * critical section is active. When it reports no waiter, Give
+ * sets the binary value to one and returns without scheduling.
+ *----------------------------------------------------------*/
+static void test_give_without_waiter_makes_available(void)
+{
+	osBinSem sem;
+
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	osBinSemInit(&sem, 0);
+
+	osBinSemGive(&sem);
+
+	expect_value("BS-07 give stores available signal", 1, &sem);
+	expect_count("BS-07 enters critical section", 1U,
+				 fakeOsPortEnterCriticalCallCount());
+	expect_count("BS-07 exits critical section", 1U,
+				 fakeOsPortExitCriticalCallCount());
+	expect_count("BS-07 executes memory barrier", 1U,
+				 fakeOsPortMemoryBarrierCallCount());
+	expect_count("BS-07 restores saved interrupt state",
+				 FAKE_OS_PORT_SAVED_IRQ_STATE,
+				 fakeOsPortLastRestoredIrqState());
+	expect_count("BS-07 checks for one waiter", 1U,
+				 fakeOsKernelUnblockCallCount());
+	expect_pointer("BS-07 checks requested semaphore", &sem,
+				   fakeOsKernelLastUnblockedSemaphore());
+	expect_count("BS-07 does not request context switch", 0U,
+				 fakeOsKernelContextSwitchCallCount());
+}
+
+/*-----------------------------------------------------------
+ * BS-08: Repeated gives remain binary when no waiter exists.
+ *
+ * Two Give calls exercise two complete protected operations,
+ * but the stored value must remain one rather than becoming a
+ * counting semaphore value of two.
+ *----------------------------------------------------------*/
+static void test_repeated_give_coalesces_signal(void)
+{
+	osBinSem sem;
+
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	osBinSemInit(&sem, 1);
+
+	osBinSemGive(&sem);
+	osBinSemGive(&sem);
+
+	expect_value("BS-08 repeated give remains binary", 1, &sem);
+	expect_count("BS-08 enters critical section twice", 2U,
+				 fakeOsPortEnterCriticalCallCount());
+	expect_count("BS-08 exits critical section twice", 2U,
+				 fakeOsPortExitCriticalCallCount());
+	expect_count("BS-08 executes two memory barriers", 2U,
+				 fakeOsPortMemoryBarrierCallCount());
+	expect_count("BS-08 checks waiters twice", 2U,
+				 fakeOsKernelUnblockCallCount());
+	expect_count("BS-08 does not request context switch", 0U,
+				 fakeOsKernelContextSwitchCallCount());
+}
+
+/*-----------------------------------------------------------
+ * BS-09: Giving with a waiter performs direct handoff.
+ *
+ * The fake kernel reports that one waiter became ready. Give
+ * must therefore leave the stored value at zero, publish the
+ * handoff, restore the interrupt state, and request one context
+ * switch for the newly readied thread.
+ *----------------------------------------------------------*/
+static void test_give_with_waiter_uses_direct_handoff(void)
+{
+	osBinSem sem;
+
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	fakeOsKernelSetUnblockResult(true);
+	osBinSemInit(&sem, 0);
+
+	osBinSemGive(&sem);
+
+	expect_value("BS-09 direct handoff keeps value zero", 0, &sem);
+	expect_count("BS-09 enters critical section", 1U,
+				 fakeOsPortEnterCriticalCallCount());
+	expect_count("BS-09 exits critical section", 1U,
+				 fakeOsPortExitCriticalCallCount());
+	expect_count("BS-09 executes memory barrier", 1U,
+				 fakeOsPortMemoryBarrierCallCount());
+	expect_count("BS-09 restores saved interrupt state",
+				 FAKE_OS_PORT_SAVED_IRQ_STATE,
+				 fakeOsPortLastRestoredIrqState());
+	expect_count("BS-09 unblocks one waiter", 1U,
+				 fakeOsKernelUnblockCallCount());
+	expect_pointer("BS-09 hands off requested semaphore", &sem,
+				   fakeOsKernelLastUnblockedSemaphore());
+	expect_count("BS-09 requests one context switch", 1U,
+				 fakeOsKernelContextSwitchCallCount());
+}
+
 int main(void)
 {
 	/* Execute the initialization contract tests in plan order. */
@@ -227,6 +330,9 @@ int main(void)
 	test_init_clamps_negative_value();
 	test_take_available();
 	test_take_unavailable_blocks();
+	test_give_without_waiter_makes_available();
+	test_repeated_give_coalesces_signal();
+	test_give_with_waiter_uses_direct_handoff();
 
 	/* Returning success makes the CI job green when every check passes. */
 	printf("All %u binary semaphore host checks passed.\n", tests_run);
