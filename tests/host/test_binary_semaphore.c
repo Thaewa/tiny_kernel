@@ -70,6 +70,32 @@ static void expect_count(const char *test_name,
 	printf("PASS: %s\n", test_name);
 }
 
+/*-----------------------------------------------------------
+ * expect_pointer
+ *
+ * Confirms that an internal kernel service received the exact
+ * object supplied by the semaphore operation. Pointer identity
+ * matters because a thread must be linked to the semaphore on
+ * which it actually attempted to wait.
+ *----------------------------------------------------------*/
+static void expect_pointer(const char *test_name,
+						   const void *expected,
+						   const void *actual)
+{
+	tests_run++;
+	if (actual != expected)
+	{
+		fprintf(stderr,
+				"FAIL: %s (expected %p, got %p)\n",
+				test_name,
+				expected,
+				actual);
+		exit(EXIT_FAILURE);
+	}
+
+	printf("PASS: %s\n", test_name);
+}
+
 /* BS-01: An initial value of one makes the semaphore available. */
 static void test_init_available(void)
 {
@@ -153,6 +179,45 @@ static void test_take_available(void)
 				 fakeOsKernelContextSwitchCallCount());
 }
 
+/*-----------------------------------------------------------
+ * BS-06: Taking an unavailable semaphore blocks the caller.
+ *
+ * The semaphore value must remain zero while the kernel records
+ * the current thread's wait relationship. After shared state is
+ * published and the saved interrupt state is restored, exactly
+ * one context-switch request must be issued so another runnable
+ * thread can execute.
+ *----------------------------------------------------------*/
+static void test_take_unavailable_blocks(void)
+{
+	osBinSem sem;
+
+	/* Begin with no recorded calls and no available semaphore signal. */
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	osBinSemInit(&sem, 0);
+
+	/* Exercise the blocking path of the production implementation. */
+	osBinSemTake(&sem);
+
+	expect_value("BS-06 unavailable value remains zero", 0, &sem);
+	expect_count("BS-06 enters critical section", 1U,
+				 fakeOsPortEnterCriticalCallCount());
+	expect_count("BS-06 exits critical section", 1U,
+				 fakeOsPortExitCriticalCallCount());
+	expect_count("BS-06 executes memory barrier", 1U,
+				 fakeOsPortMemoryBarrierCallCount());
+	expect_count("BS-06 restores saved interrupt state",
+				 FAKE_OS_PORT_SAVED_IRQ_STATE,
+				 fakeOsPortLastRestoredIrqState());
+	expect_count("BS-06 blocks current thread once", 1U,
+				 fakeOsKernelBlockCallCount());
+	expect_pointer("BS-06 blocks on requested semaphore", &sem,
+				   fakeOsKernelLastBlockedSemaphore());
+	expect_count("BS-06 requests one context switch", 1U,
+				 fakeOsKernelContextSwitchCallCount());
+}
+
 int main(void)
 {
 	/* Execute the initialization contract tests in plan order. */
@@ -161,8 +226,9 @@ int main(void)
 	test_init_clamps_positive_value();
 	test_init_clamps_negative_value();
 	test_take_available();
+	test_take_unavailable_blocks();
 
 	/* Returning success makes the CI job green when every check passes. */
-	printf("All %u binary semaphore host tests passed.\n", tests_run);
+	printf("All %u binary semaphore host checks passed.\n", tests_run);
 	return EXIT_SUCCESS;
 }
