@@ -87,8 +87,12 @@ Each thread has a task control block and a statically allocated stack. Threads
 are linked in a circular list and the scheduler selects the next thread in the
 ready state.
 
-SysTick provides periodic preemption and performs context switching. TIM2
-provides the 1 ms kernel time base used by `osDelay()`.
+SysTick requests periodic preemption and PendSV performs context switching.
+`osYield()` also requests PendSV without resetting the SysTick counter. TIM2
+provides the independent 1 ms kernel time base used by `osDelay()`.
+
+See [PendSV verification](docs/pendsv-context-switch-test-plan.md) for the
+hardware checks required to verify exception handling and stack restoration.
 
 The public kernel API currently includes:
 
@@ -114,7 +118,6 @@ The next planned milestones are:
 - Separate synchronization code from the kernel core
 - Add counting semaphores
 - Add mutex ownership and misuse detection
-- Move context switching to PendSV
 - Add priority-based scheduling
 - Add priority inheritance for mutexes
 - Add message queues and event flags
@@ -128,6 +131,8 @@ The next planned milestones are:
 - No semaphore timeout
 - No dynamic task creation after the kernel starts has been validated
 - No stack overflow detection
+- No floating-point task context preservation
+- Blocking calls require scheduling to be unmasked; misuse is not yet detected
 - Timing configuration currently assumes a 16 MHz system clock
 - Some generated STM32CubeIDE build files may contain machine-specific paths
 

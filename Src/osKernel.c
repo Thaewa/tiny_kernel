@@ -20,9 +20,6 @@
 #define CR1_CEN			(1U<<0)
 #define DIER_UIE		(1U<<0)
 
-#define INTCTRL				(*((volatile uint32_t *)0xE000ED04))
-#define PENDSTSET			(1U<<26)
-
 //uint32_t period_tick;
 
 
@@ -206,6 +203,13 @@ static void idle_task(void)
 	while(1)
 	{
 		__WFI();
+
+		/*
+		 * Offer the CPU to ready threads after an interrupt wakes idle.
+		 * This also permits cooperative scheduling with SysTick stopped:
+		 * TIM2 wakes WFI, then this explicit yield requests PendSV.
+		 */
+		osYield();
 	}
 }
 
@@ -242,8 +246,18 @@ void osKernelLaunch(uint32_t quanta)
 	/*Clear systick current value register*/
 	SysTick->VAL = 0;
 
-	/*Set systick to low priority*/
-	NVIC_SetPriority(SysTick_IRQn,15);
+	/*
+	 * Keep both exceptions at the lowest implemented priority. PendSV must
+	 * not preempt SysTick or another handler: this port switches the MSP,
+	 * so the saved frame must belong to a thread, not a nested ISR.
+	 * Equal priorities prevent either exception from preempting the other;
+	 * PendSV can run after SysTick returns, including by tail-chaining.
+	 */
+	NVIC_SetPriority(PendSV_IRQn, 15);
+	NVIC_SetPriority(SysTick_IRQn, 15);
+
+	/* Discard stale scheduling requests before the first thread starts. */
+	SCB->ICSR = SCB_ICSR_PENDSVCLR_Msk | SCB_ICSR_PENDSTCLR_Msk;
 
 	/*Enable systick interrupt*/
 	//SysTick->CTRL  |= CTRL_TICKINT;
@@ -257,14 +271,32 @@ void osKernelLaunch(uint32_t quanta)
 /*-----------------------------------------------------------
  * SysTick_Handler
  *
- * System tick interrupt handler (context switch mechanism).
- * This handler saves the current thread context, calls the scheduler
- * to pick the next ready thread, restores the new context, and resumes.
+ * Requests round-robin scheduling when the time quantum expires.
+ * TIM2 remains responsible for the independent millisecond time base.
+ * Returning normally lets PendSV receive a thread's exception frame;
+ * this handler must not save or restore a task stack itself.
+ *----------------------------------------------------------*/
+void SysTick_Handler(void)
+{
+	osYield();
+}
+
+/*-----------------------------------------------------------
+ * PendSV_Handler
+ *
+ * Performs the deferred context switch requested by SysTick or a thread.
+ * At the lowest exception priority it cannot preempt another handler.
+ * The existing port uses MSP for thread stacks and exception frames;
+ * R4-R11 are saved in software, while the CPU saves the basic frame.
+ * Interrupts protect currentPt and stack selection during the switch.
+ *
+ * This milestone retains the basic integer context of the original
+ * port. Saving floating-point task context is not implemented here.
  *----------------------------------------------------------*/
 /* When exception occurs these registers are automatically
  * saved onto the stack: r0, r1, r2, r3, r12, lr, pc, xPSR.
  */
-__attribute__((naked)) void SysTick_Handler(void)
+__attribute__((naked)) void PendSV_Handler(void)
 {
 	__asm volatile(
 	/*SUSPEND CURRENT THREAD*/
@@ -338,17 +370,21 @@ __attribute__((naked)) void osSchedulerBootStrap(void)
 /*-----------------------------------------------------------
  * osYield
  *
- * Requests a context switch by manually triggering the SysTick interrupt.
- * It first clears the current SysTick value register and then sets the
- * PendSV flag through the interrupt control register (INTCTRL).
+ * Requests a deferred context switch by pending the PendSV exception.
+ * A direct write sets only the requested ICSR command bit; no read-modify-
+ * write is needed. Multiple requests before service coalesce into one.
+ * SysTick's counter is left running, so yielding does not restart the
+ * periodic scheduling timer.
+ *
+ * The barriers complete the request before subsequent instructions.
+ * They do not unmask interrupts: if the caller masks PendSV, the switch
+ * stays pending. Blocking callers must allow scheduling to proceed.
  *----------------------------------------------------------*/
 void osYield(void)
 {
-	/* Clear SysTick Current Value register to reset the counter */
-	SysTick->VAL = 0;
-
-	/* Trigger SysTick interrupt by setting the PENDSTSET bit */
-	INTCTRL = PENDSTSET;
+	SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
+	__DSB();
+	__ISB();
 }
 
 /*-----------------------------------------------------------
@@ -447,8 +483,8 @@ void osKernelBlockCurrentOnSemaphore(osBinSem *sem)
  * osKernelRequestContextSwitch
  *
  * Provides a portable scheduling request to synchronization
- * primitives. The current Cortex-M implementation delegates to
- * osYield(); a later milestone will route this request to PendSV.
+ * primitives. osYield() pends PendSV, keeping exception registers and
+ * assembly context switching outside the portable semaphore module.
  *----------------------------------------------------------*/
 void osKernelRequestContextSwitch(void)
 {
