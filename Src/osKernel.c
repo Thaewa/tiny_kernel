@@ -203,6 +203,13 @@ static void idle_task(void)
 	while(1)
 	{
 		__WFI();
+
+		/*
+		 * Offer the CPU to ready threads after an interrupt wakes idle.
+		 * This also permits cooperative scheduling with SysTick stopped:
+		 * TIM2 wakes WFI, then this explicit yield requests PendSV.
+		 */
+		osYield();
 	}
 }
 

@@ -28,14 +28,51 @@ call blocking task APIs. Floating-point task context is not supported.
 4. Confirm an unavailable semaphore take switches away and returns only
    after a give wakes its waiter. Confirm the producer's give also reaches
    PendSV when a waiter is readied.
-5. To verify periodic preemption independently of blocking/yielding,
-   temporarily use two integer-only busy-loop tasks with distinct volatile
-   counters. Both counters must advance without calls to `osYield` or
-   `osDelay`. Preserve and restore the semaphore demo before committing.
-6. To verify explicit yield independently of SysTick, temporarily disable
-   SysTick after startup and run two tasks that increment distinct counters
-   and call `osYield`. Both counters must advance. Restore the timer and
-   demo after this separate diagnostic run.
+5. Run diagnostic mode 1 below to verify periodic preemption independently
+   of worker blocking/yielding.
+6. Run diagnostic mode 2 below to verify explicit yield with SysTick stopped.
+
+## Selecting a hardware diagnostic
+
+The application selection is defined in `Inc/osHardwareTest.h`:
+
+| Value | Application | Expected observations |
+| --- | --- | --- |
+| 0 (default) | Semaphore producer/consumer | Matching counters, LED pulses |
+| 1 | Preemption | Both busy-loop worker counters advance without worker yield/delay |
+| 2 | Explicit yield | Both worker counters advance with SysTick stopped |
+
+In CubeIDE, open Project Properties > C/C++ Build > Settings > MCU GCC
+Compiler > Preprocessor. Add `OS_HARDWARE_TEST_MODE=1` for mode 1 or
+`OS_HARDWARE_TEST_MODE=2` for mode 2. Clean, build, and flash after each
+change. Alternatively, temporarily edit the default in the selection header
+to `OS_HW_TEST_PREEMPTION` or `OS_HW_TEST_YIELD` and restore it after testing.
+Do not define the mode in both places. Remove the compiler symbol and
+rebuild mode 0 before committing IDE settings or returning to the demo.
+
+Observe UART at 115200 baud without breakpoints for at least 20 reports in
+each mode. The startup banner identifies the flashed application. Each
+report prints `PASS` or `FAIL`, worker counters A/B, unsigned progress
+deltas dA/dB, SysTick control, cumulative failures and the kernel timestamp.
+Expect nonzero dA and dB, continuing timestamps, and `failures=0`. Counts do
+not need to be equal. A UART stall is also a failed observation: a starved
+reporter cannot print its own failure. LED activity alone is insufficient.
+
+Mode 1 workers never yield, delay, or use a semaphore. The reporter also
+polls without yielding. SysTick must have ENABLE and TICKINT set in each
+sample (other control bits, including COUNTFLAG, may also be set).
+
+Mode 2 uses SysTick only to start the first worker after the initial idle
+thread. Worker A then stops SysTick and clears its pending exception before
+its loop. Both workers and the reporter explicitly yield. Samples must
+show `tick=0x0`. TIM2 continues counting milliseconds and wakes the idle
+thread, which explicitly yields after WFI. TIM2 itself does not request a
+switch. Thus continued worker progress after setup uses explicit PendSV
+requests, not periodic SysTick preemption. This is not a test of switching
+with every hardware interrupt disabled.
+
+These checks cover scheduling liveness, not exhaustive preservation of
+registers, floating-point context, or invalid blocking-call contexts.
 
 ## Timing and blocking contracts
 
