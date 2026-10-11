@@ -27,8 +27,9 @@ using a 1 ms timer tick. A binary semaphore implementation is present, but its
 behavior under multiple waiters, interrupt usage, and edge cases still needs
 systematic testing.
 
-This repository currently represents the initial baseline before the
-synchronization subsystem is refactored and extended.
+A portable [FIFO wait queue](docs/fifo-wait-queue.md) and its host tests are
+present as a building block. It is not yet connected to semaphore waiters;
+current semaphore wake-up order still follows the kernel's TCB scan.
 
 ## Target Hardware
 

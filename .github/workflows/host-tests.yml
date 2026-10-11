@@ -43,3 +43,26 @@ jobs:
       # A failed assertion exits non-zero and marks this job as failed.
       - name: Run host tests
         run: build/host-tests/test_binary_semaphore
+
+  wait-queue:
+    name: FIFO Wait Queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Run optimized code with sanitizers to expose invalid pointer access
+      # and undefined C behavior. The queue uses no hardware or kernel fakes.
+      - name: Build wait queue tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc Src/osWaitQueue.c tests/host/test_wait_queue.c \
+            -o build/host-tests/test_wait_queue
+
+      # Bound execution so a regression cannot hang forever in a cycle.
+      - name: Run wait queue tests
+        run: timeout 15s build/host-tests/test_wait_queue
