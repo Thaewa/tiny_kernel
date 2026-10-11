@@ -8,6 +8,7 @@
 
 /* Resets all recorded internal-kernel calls before each host test. */
 void fakeOsKernelReset(void);
+void fakeOsKernelSetRunnableCaller(bool ready);
 
 /* Configures whether the fake unblock service reports a waiting thread. */
 void fakeOsKernelSetUnblockResult(bool result);

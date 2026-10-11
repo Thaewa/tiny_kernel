@@ -132,7 +132,8 @@ The next planned milestones are:
 - No dynamic task creation after the kernel starts has been validated
 - No stack overflow detection
 - No floating-point task context preservation
-- Blocking calls require scheduling to be unmasked; misuse is not yet detected
+- Blocking calls require scheduling to be unmasked; invalid take/delay calls
+  stop with debugger diagnostics (see [contract](docs/blocking-context-contract.md))
 - Timing configuration currently assumes a 16 MHz system clock
 - Some generated STM32CubeIDE build files may contain machine-specific paths
 

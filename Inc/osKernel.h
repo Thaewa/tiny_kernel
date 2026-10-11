@@ -17,6 +17,7 @@ void osYield(void);
 void task3(void);
 
 void osKernelTick(void);
+/* Task-only; scheduling must be unmasked, including for ms == 0. */
 void osDelay(uint32_t ms);
 
 extern volatile uint32_t osTimeMs;

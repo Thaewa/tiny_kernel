@@ -20,6 +20,7 @@ typedef struct
 void osBinSemInit(osBinSem *sem, int32_t initial);
 
 /* Takes a semaphore or blocks the calling thread until it is given. */
+/* Task-only. Invalid blocking context is fatal; see osBlocking.h. */
 void osBinSemTake(osBinSem *sem);
 
 /* Gives a semaphore and wakes one waiting thread when present. */

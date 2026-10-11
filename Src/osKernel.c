@@ -2,6 +2,7 @@
 
 #include "osKernel.h"
 #include "osKernelInternal.h"
+#include "osBlocking.h"
 #include "cmsis_gcc.h"
 
 //#define NUM_OF_THREADS			3
@@ -51,6 +52,12 @@ tcbType *currentPt = 0;
 volatile uint8_t thread_count = 0;
 
 volatile uint32_t osTimeMs = 0;
+static volatile uint32_t kernelRunning;
+
+bool osKernelHasRunnableCaller(void)
+{
+	return kernelRunning && currentPt && (currentPt->state == THREAD_READY);
+}
 
 /*-----------------------------------------------------------
  * thread_exit
@@ -264,6 +271,8 @@ void osKernelLaunch(uint32_t quanta)
 	SysTick->CTRL = CTRL_CLCKSRC | CTRL_TICKINT | CTRL_ENABLE;
 
 	/*Launch scheduler*/
+	/* Interrupts remain masked until bootstrap selects the first stack. */
+	kernelRunning = 1U;
 	osSchedulerBootStrap();
 }
 
@@ -499,8 +508,15 @@ void osKernelRequestContextSwitch(void)
  *----------------------------------------------------------*/
 void osDelay(uint32_t ms)
 {
-    /* Disable interrupts to modify thread state safely */
-    __disable_irq();
+    /* Even delay(0) currently sleeps/yields, so it requires valid context. */
+    osExecutionContext caller = osPortGetExecutionContext();
+    uint32_t errors = osBlockingContextErrors(caller);
+    if (errors != 0U)
+    {
+        osPortBlockingFault(errors, OS_BLOCK_OPERATION_DELAY, caller);
+    }
+
+    osIrqState irqState = osPortEnterCritical();
 
     /* Calculate absolute wake-up time */
     currentPt->wake_at_ms = osTimeMs + ms;
@@ -508,9 +524,9 @@ void osDelay(uint32_t ms)
     /* Mark current thread as sleeping */
     currentPt->state = THREAD_SLEEPING;
 
-    /* Re-enable interrupts to allow other threads/ISRs to proceed */
-    __enable_irq();
-
-    /* Yield CPU to switch to another runnable thread */
+    /* Publish sleeping state and pend PendSV before restoring interrupts.
+     * An ISR cannot observe an incomplete sleep/scheduling transition. */
+    osPortMemoryBarrier();
     osYield();
+    osPortExitCritical(irqState);
 }
