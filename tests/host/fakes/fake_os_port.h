@@ -2,6 +2,13 @@
 #define FAKE_OS_PORT_H
 
 #include <stdint.h>
+#include <setjmp.h>
+#include "osPort.h"
+
+/* Fatal paths jump back to a test; they must never return to production C. */
+extern jmp_buf fakeOsPortFaultJump;
+extern int fakeOsPortFaultExpected;
+void fakeOsPortSetExecutionContext(osExecutionContext caller);
 
 #define FAKE_OS_PORT_SAVED_IRQ_STATE (0xA5A5A5A5U)
 

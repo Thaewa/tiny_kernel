@@ -4,6 +4,7 @@
 #include "osSemaphore.h"
 #include "fake_os_kernel.h"
 #include "fake_os_port.h"
+#include "osBlocking.h"
 
 /* Number of assertions that completed successfully in this test process. */
 static unsigned int tests_run;
@@ -184,9 +185,9 @@ static void test_take_available(void)
  *
  * The semaphore value must remain zero while the kernel records
  * the current thread's wait relationship. After shared state is
- * published and the saved interrupt state is restored, exactly
- * one context-switch request must be issued so another runnable
- * thread can execute.
+ * published, exactly one context-switch request is pended before
+ * the saved interrupt state is restored. The hardware may then
+ * dispatch PendSV so another runnable thread can execute.
  *----------------------------------------------------------*/
 static void test_take_unavailable_blocks(void)
 {
@@ -321,6 +322,91 @@ static void test_give_with_waiter_uses_direct_handoff(void)
 				 fakeOsKernelContextSwitchCallCount());
 }
 
+/*
+ * Regression for masked blocking: capture the fatal path with setjmp instead
+ * of allowing a fake fault handler to return success from a void take API.
+ * The static semaphore remains well-defined across longjmp even if a buggy
+ * implementation writes it after setjmp. Check absence of TCB mutation and
+ * scheduling requests, not just the existence of an error notification.
+ */
+static void test_rejected_take(osExecutionContext caller, bool ready,
+                               int32_t initial, uint32_t expectedErrors)
+{
+	static osBinSem sem;
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	fakeOsPortSetExecutionContext(caller);
+	fakeOsKernelSetRunnableCaller(ready);
+	osBinSemInit(&sem, initial);
+	fakeOsPortFaultExpected = 1;
+	if (setjmp(fakeOsPortFaultJump) == 0)
+	{
+		osBinSemTake(&sem);
+		fprintf(stderr, "FAIL: invalid take returned normally\n");
+		exit(EXIT_FAILURE);
+	}
+	fakeOsPortFaultExpected = 0;
+
+	expect_count("guard records exact reasons", expectedErrors,
+	             osLastBlockingFault.errors);
+	expect_count("guard records semaphore operation", OS_BLOCK_OPERATION_SEMAPHORE,
+	             osLastBlockingFault.operation);
+	expect_count("guard preserves caller IPSR", caller.ipsr,
+	             osLastBlockingFault.caller.ipsr);
+	expect_count("guard preserves caller PRIMASK", caller.primask,
+	             osLastBlockingFault.caller.primask);
+	expect_count("guard preserves caller BASEPRI", caller.basepri,
+	             osLastBlockingFault.caller.basepri);
+	expect_count("guard preserves caller FAULTMASK", caller.faultmask,
+	             osLastBlockingFault.caller.faultmask);
+	expect_value("rejected take leaves signal unchanged", initial, &sem);
+	expect_count("rejected take never publishes blocked state", 0U,
+	             fakeOsKernelBlockCallCount());
+	expect_pointer("rejected take leaves wait relationship unset", NULL,
+	               fakeOsKernelLastBlockedSemaphore());
+	expect_count("rejected take never requests a switch", 0U,
+	             fakeOsKernelContextSwitchCallCount());
+	expect_count("rejected take balances critical section",
+	             fakeOsPortEnterCriticalCallCount(),
+	             fakeOsPortExitCriticalCallCount());
+}
+
+static void test_blocking_context_contract(void)
+{
+	/* Each mask alone must reject an unavailable take, before blocking. */
+	test_rejected_take((osExecutionContext){0U, 1U, 0U, 0U}, true, 0,
+	                   OS_BLOCK_ERROR_PRIMASK);
+	test_rejected_take((osExecutionContext){0U, 0U, 0x50U, 0U}, true, 0,
+	                   OS_BLOCK_ERROR_BASEPRI);
+	test_rejected_take((osExecutionContext){0U, 0U, 0U, 1U}, true, 0,
+	                   OS_BLOCK_ERROR_FAULTMASK);
+	/* Task-only restrictions apply even to an immediately available take. */
+	test_rejected_take((osExecutionContext){16U, 0U, 0U, 0U}, true, 1,
+	                   OS_BLOCK_ERROR_ISR);
+	test_rejected_take((osExecutionContext){0U, 0U, 0U, 0U}, false, 1,
+	                   OS_BLOCK_ERROR_NO_TASK);
+	test_rejected_take((osExecutionContext){16U, 1U, 0x50U, 1U}, false, 0,
+	                   OS_BLOCK_ERROR_ISR | OS_BLOCK_ERROR_PRIMASK |
+	                   OS_BLOCK_ERROR_BASEPRI | OS_BLOCK_ERROR_FAULTMASK |
+	                   OS_BLOCK_ERROR_NO_TASK);
+
+	/* A masked ready task may consume a signal without scheduling. */
+	osBinSem sem;
+	fakeOsPortReset();
+	fakeOsKernelReset();
+	fakeOsPortSetExecutionContext((osExecutionContext){0U, 1U, 0x50U, 1U});
+	osBinSemInit(&sem, 1);
+	osBinSemTake(&sem);
+	expect_value("masked fast take consumes available signal", 0, &sem);
+	expect_count("masked fast take does not block", 0U,
+	             fakeOsKernelBlockCallCount());
+	expect_count("masked fast take does not request switch", 0U,
+	             fakeOsKernelContextSwitchCallCount());
+	expect_count("masked fast take restores saved state",
+	             FAKE_OS_PORT_SAVED_IRQ_STATE,
+	             fakeOsPortLastRestoredIrqState());
+}
+
 int main(void)
 {
 	/* Execute the initialization contract tests in plan order. */
@@ -333,6 +419,7 @@ int main(void)
 	test_give_without_waiter_makes_available();
 	test_repeated_give_coalesces_signal();
 	test_give_with_waiter_uses_direct_handoff();
+	test_blocking_context_contract();
 
 	/* Returning success makes the CI job green when every check passes. */
 	printf("All %u binary semaphore host checks passed.\n", tests_run);

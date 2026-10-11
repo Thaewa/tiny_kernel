@@ -5,6 +5,9 @@
 
 #include <osSemaphore.h>
 
+/* True only after launch, with a current thread still in the ready state. */
+bool osKernelHasRunnableCaller(void);
+
 /*
  * Marks the current thread as blocked on the supplied semaphore.
  * This is an internal service used by the synchronization subsystem.

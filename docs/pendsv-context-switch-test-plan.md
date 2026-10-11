@@ -84,8 +84,9 @@ fresh full quantum after every voluntary switch.
 PendSV cannot execute while PRIMASK masks configurable exceptions. It also
 cannot execute under a BASEPRI mask that excludes its priority. Do not call
 a potentially blocking API while the caller masks scheduling. Blocking
-context validation and fail-fast handling remain a separate milestone;
-moving the handler alone does not enforce this precondition.
+context validation and fail-fast handling are defined in the
+[blocking context contract](blocking-context-contract.md). Moving the
+handler alone does not enforce this precondition.
 
 ## Results
 

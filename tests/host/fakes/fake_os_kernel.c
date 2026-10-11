@@ -8,6 +8,7 @@ static uint32_t contextSwitchCallCount;
 static osBinSem *lastBlockedSemaphore;
 static osBinSem *lastUnblockedSemaphore;
 static bool unblockResult;
+static bool runnableCaller;
 
 void fakeOsKernelReset(void)
 {
@@ -17,6 +18,17 @@ void fakeOsKernelReset(void)
 	lastBlockedSemaphore = 0;
 	lastUnblockedSemaphore = 0;
 	unblockResult = false;
+	runnableCaller = true;
+}
+
+void fakeOsKernelSetRunnableCaller(bool ready)
+{
+	runnableCaller = ready;
+}
+
+bool osKernelHasRunnableCaller(void)
+{
+	return runnableCaller;
 }
 
 void fakeOsKernelSetUnblockResult(bool result)

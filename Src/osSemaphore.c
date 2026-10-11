@@ -1,6 +1,7 @@
 #include "osSemaphore.h"
 #include "osKernelInternal.h"
 #include "osPort.h"
+#include "osBlocking.h"
 
 /*-----------------------------------------------------------
  * osBinSemInit
@@ -42,12 +43,27 @@ void osBinSemInit(osBinSem *sem, int32_t initial)
  * marks the current thread as blocked before a context switch is
  * requested.
  *
+ * Take requires a ready task in a running kernel. Only a fast take
+ * may execute with a caller mask set. An unavailable take checks
+ * the original caller context before publishing any wait state;
+ * misuse stops in osPortBlockingFault with debugger diagnostics.
+ *
  * The port layer hides Cortex-M interrupt and memory-barrier
  * instructions from this portable synchronization module. Host
  * tests replace that layer with fakes that record each operation.
  *----------------------------------------------------------*/
 void osBinSemTake(osBinSem *sem)
 {
+	/* Inspect the caller, not the interrupt mask introduced below. */
+	osExecutionContext caller = osPortGetExecutionContext();
+	uint32_t errors = osBlockingContextErrors(caller);
+
+	/* This is a task API even when a signal is immediately available. */
+	if (errors & (OS_BLOCK_ERROR_ISR | OS_BLOCK_ERROR_NO_TASK))
+	{
+		osPortBlockingFault(errors, OS_BLOCK_OPERATION_SEMAPHORE, caller);
+	}
+
 	/* Preserve the caller's interrupt-mask state before entering. */
 	osIrqState irqState = osPortEnterCritical();
 
@@ -62,15 +78,23 @@ void osBinSemTake(osBinSem *sem)
 		return;
 	}
 
+	/* Reject unsafe blocking before touching the task's wait relationship. */
+	if (errors != 0U)
+	{
+		osPortExitCritical(irqState);
+		osPortBlockingFault(errors, OS_BLOCK_OPERATION_SEMAPHORE, caller);
+	}
+
 	/* Record the wait relationship while kernel state is protected. */
 	osKernelBlockCurrentOnSemaphore(sem);
 
 	/* Publish the blocked state before scheduling another thread. */
 	osPortMemoryBarrier();
-	osPortExitCritical(irqState);
 
-	/* Context switching is requested only after interrupts are restored. */
+	/* Publish state and pend the switch as one protected transition.
+	 * PendSV runs only after the saved interrupt state is restored. */
 	osKernelRequestContextSwitch();
+	osPortExitCritical(irqState);
 }
 
 /*-----------------------------------------------------------

@@ -1,6 +1,37 @@
 #include <osPort.h>
 #include <cmsis_gcc.h>
 
+volatile osBlockingFaultRecord osLastBlockingFault;
+
+osExecutionContext osPortGetExecutionContext(void)
+{
+	osExecutionContext caller = {
+		__get_IPSR(), __get_PRIMASK(), __get_BASEPRI(), __get_FAULTMASK()
+	};
+	return caller;
+}
+
+/*
+ * A void take/delay API cannot report rejection as an ordinary return.
+ * Save the original caller snapshot, mask interrupts, and stop at a named
+ * location for the debugger. Do not printf here: UART may require interrupts
+ * or locks. This remains active under NDEBUG and does not silently unmask
+ * a caller's critical section. Reset is required to resume normal operation.
+ */
+_Noreturn void osPortBlockingFault(uint32_t errors, uint32_t operation,
+                                 osExecutionContext caller)
+{
+	__disable_irq();
+	osLastBlockingFault.errors = errors;
+	osLastBlockingFault.operation = operation;
+	osLastBlockingFault.caller = caller;
+	__DSB();
+	while (1)
+	{
+		__NOP();
+	}
+}
+
 /*-----------------------------------------------------------
  * osPortEnterCritical
  *
