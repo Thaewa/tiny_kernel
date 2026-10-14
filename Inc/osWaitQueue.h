@@ -15,7 +15,7 @@ struct osWaitNode
 	osWaitNode *next;
 	osWaitNode *previous;
 	osWaitQueue *container; /* NULL means this node is not waiting anywhere. */
-	void *owner;            /* Caller-owned payload, later a pointer to a TCB. */
+	void *owner;            /* Caller-owned payload; semaphore nodes use a TCB. */
 };
 
 struct osWaitQueue

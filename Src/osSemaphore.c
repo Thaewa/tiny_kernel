@@ -28,6 +28,8 @@ void osBinSemInit(osBinSem *sem, int32_t initial)
 {
 	/* Clamp the requested value to the binary range of zero or one. */
 	sem->value = (initial > 0) ? 1 : 0;
+	/* Initializes fresh storage; callers must not reset an active wait queue. */
+	(void)osWaitQueueInit(&sem->waiters);
 }
 
 /*-----------------------------------------------------------
@@ -122,10 +124,11 @@ void osBinSemGive(osBinSem *sem)
 
 	/* Publish either the stored signal or the direct handoff state. */
 	osPortMemoryBarrier();
-	osPortExitCritical(irqState);
 
 	if (waiterUnblocked)
 	{
+		/* Keep the readiness update and scheduling request atomic. */
 		osKernelRequestContextSwitch();
 	}
+	osPortExitCritical(irqState);
 }

@@ -18,7 +18,7 @@ typedef struct
 typedef struct
 {
 	uint32_t errors;
-	uint32_t operation; /* 1: semaphore take, 2: delay. */
+	uint32_t operation; /* 1: take, 2: delay, 3: wait enqueue, 4: wait dequeue. */
 	osExecutionContext caller;
 } osBlockingFaultRecord;
 

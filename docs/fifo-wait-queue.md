@@ -1,8 +1,9 @@
 # FIFO wait queue: structure and contract
 
-This milestone adds a portable queue and host tests. The scheduler and
-semaphore do not use it yet: semaphore wake-up still scans TCB storage.
-Connecting the queue to task state transitions is the next change.
+The portable queue now backs each binary semaphore's waiter list.
+`osKernelWait.c` connects nodes to task states. The round-robin scheduler's
+own circular ready-task scan remains separate. See the
+[integration guide](semaphore-fifo-integration.md) for details and tests.
 
 ## Storage and ownership
 
@@ -30,9 +31,9 @@ owner survives removal. A removed node can immediately be reused elsewhere.
 
 Initialize queue and node storage before first use. Do not reinitialize a
 nonempty queue or a linked node; initialization is not removal. Keep all
-objects alive while linked. One node can belong to at most one queue. Future
-kernel integration must also ensure a task cannot bypass this invariant by
-using several different wait nodes at once.
+objects alive while linked. One node can belong to at most one queue. Each
+TCB now embeds exactly one wait node, preventing different semaphore waits
+from bypassing membership checks by allocating separate nodes for a task.
 
 ## Duplicate insertion and failure behavior
 
@@ -107,5 +108,6 @@ gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g \
 
 CubeIDE discovers `Src/osWaitQueue.c` as a normal source file when it refreshes
 the project. The unused queue functions may be removed from the final ELF by
-linker garbage collection until semaphore integration uses them. A firmware
-build is a portability check; queue behavior is verified by the host job.
+linker garbage collection if not referenced. Semaphore integration now
+references queue functions. A firmware build is a portability check;
+host and hardware integration tests verify the respective behaviors.

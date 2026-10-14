@@ -25,8 +25,13 @@ interrupts and loops without returning. Inspect it in the debugger:
 | 2 / 0x04 | Caller BASEPRI nonzero |
 | 3 / 0x08 | Caller FAULTMASK nonzero |
 | 4 / 0x10 | Kernel not running or current task not ready |
+| 5 / 0x20 | Kernel waiter/queue invariant failure |
 
-`operation` is 1 for semaphore take and 2 for delay. `caller` holds the
+`operation` is 1 for semaphore take, 2 for delay, 3 for wait enqueue and 4
+for wait dequeue. Queue faults also record `osLastWaitQueueResult` using
+the `osWaitResult` enum. For queue faults, registers are captured inside
+the protected operation, so PRIMASK may represent the internal lock.
+For caller-context faults, `caller` holds the
 original registers, not the interrupt mask subsequently set by the kernel.
 The guard remains active in release builds. It does not open a caller's
 critical section, print through UART, or return as if a void API succeeded.
@@ -35,7 +40,8 @@ Reset the target after inspecting a fault.
 Blocking state publication and PendSV request occur within one critical
 section. Restoring the saved mask permits the pending switch to run. This
 prevents an interrupt from observing a blocked task before its switch has
-been requested. List membership validation is a later wait-queue milestone.
+been requested. Semaphore FIFO integration additionally validates node
+membership and waiter identity before publishing a state transition.
 
 ## Verification
 

@@ -27,9 +27,10 @@ using a 1 ms timer tick. A binary semaphore implementation is present, but its
 behavior under multiple waiters, interrupt usage, and edge cases still needs
 systematic testing.
 
-A portable [FIFO wait queue](docs/fifo-wait-queue.md) and its host tests are
-present as a building block. It is not yet connected to semaphore waiters;
-current semaphore wake-up order still follows the kernel's TCB scan.
+Each binary semaphore owns a [FIFO wait queue](docs/fifo-wait-queue.md).
+Give selects the oldest waiter rather than scanning TCB creation order.
+See [semaphore FIFO integration](docs/semaphore-fifo-integration.md) for
+host coverage and the multi-waiter hardware diagnostic.
 
 ## Target Hardware
 
@@ -127,7 +128,6 @@ The next planned milestones are:
 ## Limitations
 
 - Synchronization edge cases have not yet been fully tested
-- Semaphore waiters are not maintained in a dedicated FIFO queue
 - No task priorities or priority inheritance
 - No semaphore timeout
 - No dynamic task creation after the kernel starts has been validated
