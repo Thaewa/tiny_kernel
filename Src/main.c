@@ -166,6 +166,98 @@ static void fifoProducer(void)
 	}
 }
 
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
+
+/*
+ * The consumer delays its first Take so the producer can test accumulation
+ * and capacity before testing blocking. Only the producer prints to UART.
+ * Counters are debugger-visible; one task writes each counter, while the
+ * shared semaphore itself is protected by the normal kernel API.
+ */
+static osCountSem countSem;
+volatile uint32_t countAccepted;
+volatile uint32_t countRejected;
+volatile uint32_t countConsumed;
+volatile uint32_t countFailures;
+
+static void countingConsumer(void)
+{
+	osDelay(1000U);
+	while (1)
+	{
+		osCountSemTake(&countSem);
+		countConsumed++;
+		/* Drain all stored tokens, then immediately rewait at zero. */
+	}
+}
+
+static uint32_t countingWaiters(void)
+{
+	osIrqState irqState = osPortEnterCritical();
+	uint32_t count = countSem.core.waiters.count;
+	osPortExitCritical(irqState);
+	return count;
+}
+
+static void countingProducer(void)
+{
+	osDelay(100U);
+	/* Capacity is three. The consumer is still sleeping, so only the first
+	 * three of these five Gives may store a token. Check every return value. */
+	for (uint32_t i = 0U; i < 5U; i++)
+	{
+		if (osCountSemGive(&countSem)) countAccepted++;
+		else countRejected++;
+	}
+	uint32_t passed = (countAccepted == 3U && countRejected == 2U &&
+	                   countConsumed == 0U && countSem.core.value == 3);
+	if (!passed) countFailures++;
+	printf("COUNT burst %s accepted=%lu rejected=%lu consumed=%lu stored=%ld "
+	       "failures=%lu\r\n", passed ? "PASS" : "FAIL",
+	       (unsigned long)countAccepted, (unsigned long)countRejected,
+	       (unsigned long)countConsumed, (long)countSem.core.value,
+	       (unsigned long)countFailures);
+
+	while (1)
+	{
+		/* Consumer must have consumed every accepted token and blocked
+		 * again. Timeout detects a missing consumer or failed rewait. */
+		uint32_t start = osTimeMs;
+		while ((countConsumed != countAccepted || countingWaiters() != 1U) &&
+		       (uint32_t)(osTimeMs - start) < 3000U)
+		{
+			osDelay(1U);
+		}
+		if (countConsumed != countAccepted || countingWaiters() != 1U)
+		{
+			countFailures++;
+			printf("COUNT FAIL: drain/rewait timeout failures=%lu\r\n",
+			       (unsigned long)countFailures);
+			while (1) osDelay(1000U);
+		}
+		osDelay(500U);
+		if (osCountSemGive(&countSem)) countAccepted++;
+		else countRejected++;
+		start = osTimeMs;
+		while ((countConsumed != countAccepted || countingWaiters() != 1U) &&
+		       (uint32_t)(osTimeMs - start) < 100U)
+		{
+			osDelay(1U);
+		}
+		passed = (countConsumed == countAccepted && countRejected == 2U &&
+		          countSem.core.value == 0 && countingWaiters() == 1U);
+		if (!passed) countFailures++;
+		printf("COUNT handoff %s accepted=%lu consumed=%lu rejected=%lu "
+		       "stored=%ld waiters=%lu failures=%lu time=%lu ms\r\n",
+		       passed ? "PASS" : "FAIL", (unsigned long)countAccepted,
+		       (unsigned long)countConsumed, (unsigned long)countRejected,
+		       (long)countSem.core.value, (unsigned long)countingWaiters(),
+		       (unsigned long)countFailures, (unsigned long)osTimeMs);
+		if (countAccepted & 1U) PIN_SET(5);
+		else PIN_RESET(5);
+	}
+}
+
 #else
 
 /*
@@ -306,6 +398,13 @@ int main(void)
 	osBinSemInit(&eventSem, 0);
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
 	osBinSemInit(&fifoSem, 0);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
+	if (!osCountSemInit(&countSem, 3U, 0U))
+	{
+		/* Invalid static test parameters must prevent a partial launch. */
+		printf("COUNT FAIL: semaphore initialization rejected.\r\n");
+		while (1) __WFI();
+	}
 #endif
 
 	/* Initialize the kernel and its idle thread. */
@@ -318,6 +417,9 @@ int main(void)
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
 	uint32_t created = osCreateThread(fifoTaskA) && osCreateThread(fifoTaskB) &&
 	                   osCreateThread(fifoTaskC) && osCreateThread(fifoProducer);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
+	uint32_t created = osCreateThread(countingConsumer) &&
+	                   osCreateThread(countingProducer);
 #else
 	uint32_t created = osCreateThread(testTaskA) &&
 	                   osCreateThread(testTaskB) &&
@@ -336,6 +438,8 @@ int main(void)
 	printf("Binary semaphore hardware test started.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
 	printf("Semaphore FIFO test: created A,B,C; expected wake 2,0,1 repeatedly.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
+	printf("Counting semaphore test: capacity=3, burst=5, then direct handoff.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_PREEMPTION
 	printf("PendSV preemption test: busy tasks, no yield or delay.\r\n");
 #else

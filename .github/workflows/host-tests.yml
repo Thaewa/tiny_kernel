@@ -89,3 +89,23 @@ jobs:
             -o build/host-tests/test_semaphore_fifo
       - name: Run integration tests
         run: timeout 15s build/host-tests/test_semaphore_fifo
+
+  counting-semaphore:
+    name: Counting Semaphore
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build counting tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc -Itests/host/fakes \
+            Src/osSemaphore.c Src/osWaitQueue.c Src/osKernelWait.c \
+            tests/host/fakes/fake_os_port.c \
+            tests/host/test_counting_semaphore.c \
+            -o build/host-tests/test_counting_semaphore
+      - name: Run counting tests
+        run: timeout 15s build/host-tests/test_counting_semaphore

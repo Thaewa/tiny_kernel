@@ -36,7 +36,7 @@ bool osKernelHasRunnableCaller(void)
 /* Caller holds the kernel critical section from semaphore Take.
  * Validate the task and queue before changing state. Duplicate insertion
  * fails in Push, preserving both the wait relationship and queue links. */
-void osKernelBlockCurrentOnSemaphore(osBinSem *sem)
+void osKernelBlockCurrentOnSemaphore(osSemaphoreCore *sem)
 {
 	if (!osKernelHasRunnableCaller() || currentPt->waitSem != NULL ||
 	    currentPt->waitNode.owner != currentPt)
@@ -55,7 +55,7 @@ void osKernelBlockCurrentOnSemaphore(osBinSem *sem)
 /* Select by FIFO membership, not TCB creation order. Validation checks the
  * oldest waiter's identity and state BEFORE unlinking it. Direct handoff
  * reserves the signal for that task, leaving semaphore value zero. */
-bool osKernelUnblockOneOnSemaphore(osBinSem *sem)
+bool osKernelUnblockOneOnSemaphore(osSemaphoreCore *sem)
 {
 	osWaitResult result = osWaitQueueValidate(&sem->waiters);
 	if (result != OS_WAIT_OK)

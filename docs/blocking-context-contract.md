@@ -28,7 +28,7 @@ interrupts and loops without returning. Inspect it in the debugger:
 | 5 / 0x20 | Kernel waiter/queue invariant failure |
 
 `operation` is 1 for semaphore take, 2 for delay, 3 for wait enqueue and 4
-for wait dequeue. Queue faults also record `osLastWaitQueueResult` using
+for wait dequeue, and 5 for counting semaphore take. Queue faults also record `osLastWaitQueueResult` using
 the `osWaitResult` enum. For queue faults, registers are captured inside
 the protected operation, so PRIMASK may represent the internal lock.
 For caller-context faults, `caller` holds the

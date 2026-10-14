@@ -12,13 +12,13 @@ bool osKernelHasRunnableCaller(void);
  * Enqueues the current thread and publishes its blocked state atomically.
  * Caller must hold the kernel critical section.
  */
-void osKernelBlockCurrentOnSemaphore(osBinSem *sem);
+void osKernelBlockCurrentOnSemaphore(osSemaphoreCore *sem);
 
 /*
  * Removes the oldest waiter and makes it ready. Caller holds the critical
  * section. Returns false only for an empty queue; corruption is fatal.
  */
-bool osKernelUnblockOneOnSemaphore(osBinSem *sem);
+bool osKernelUnblockOneOnSemaphore(osSemaphoreCore *sem);
 
 /* Requests that the scheduler select another runnable thread. */
 void osKernelRequestContextSwitch(void);

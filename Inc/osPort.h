@@ -18,7 +18,7 @@ typedef struct
 typedef struct
 {
 	uint32_t errors;
-	uint32_t operation; /* 1: take, 2: delay, 3: wait enqueue, 4: wait dequeue. */
+	uint32_t operation; /* 1: binary take, 2: delay, 3/4: queue, 5: counting take. */
 	osExecutionContext caller;
 } osBlockingFaultRecord;
 

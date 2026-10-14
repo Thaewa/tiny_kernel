@@ -16,6 +16,7 @@
 #define OS_BLOCK_OPERATION_DELAY     2U
 #define OS_BLOCK_OPERATION_WAIT_ENQUEUE 3U
 #define OS_BLOCK_OPERATION_WAIT_DEQUEUE 4U
+#define OS_BLOCK_OPERATION_COUNT_SEMAPHORE 5U
 
 /*
  * Shared policy for semaphore and delay. Evaluate a caller snapshot taken

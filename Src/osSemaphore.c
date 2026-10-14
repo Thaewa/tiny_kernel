@@ -2,6 +2,8 @@
 #include "osKernelInternal.h"
 #include "osPort.h"
 #include "osBlocking.h"
+#include <limits.h>
+#include <stddef.h>
 
 /*-----------------------------------------------------------
  * osBinSemInit
@@ -33,9 +35,9 @@ void osBinSemInit(osBinSem *sem, int32_t initial)
 }
 
 /*-----------------------------------------------------------
- * osBinSemTake
+ * takeSignal
  *
- * Acquires a binary semaphore for the calling thread. Shared
+ * Acquires one binary/counting token for the calling thread. Shared
  * semaphore and thread state is protected by a kernel critical
  * section so a concurrent thread or interrupt cannot observe a
  * partially completed operation.
@@ -54,7 +56,7 @@ void osBinSemInit(osBinSem *sem, int32_t initial)
  * instructions from this portable synchronization module. Host
  * tests replace that layer with fakes that record each operation.
  *----------------------------------------------------------*/
-void osBinSemTake(osBinSem *sem)
+static void takeSignal(osSemaphoreCore *sem, uint32_t operation)
 {
 	/* Inspect the caller, not the interrupt mask introduced below. */
 	osExecutionContext caller = osPortGetExecutionContext();
@@ -63,16 +65,17 @@ void osBinSemTake(osBinSem *sem)
 	/* This is a task API even when a signal is immediately available. */
 	if (errors & (OS_BLOCK_ERROR_ISR | OS_BLOCK_ERROR_NO_TASK))
 	{
-		osPortBlockingFault(errors, OS_BLOCK_OPERATION_SEMAPHORE, caller);
+		osPortBlockingFault(errors, operation, caller);
 	}
 
 	/* Preserve the caller's interrupt-mask state before entering. */
 	osIrqState irqState = osPortEnterCritical();
 
-	/* Consume an available binary signal without blocking. */
+	/* Both variants consume ONE stored token. A counting semaphore may
+	 * still have tokens afterward; binary storage starts at most at one. */
 	if (sem->value > 0)
 	{
-		sem->value = 0;
+		sem->value--;
 
 		/* Publish the semaphore update before leaving the section. */
 		osPortMemoryBarrier();
@@ -84,7 +87,7 @@ void osBinSemTake(osBinSem *sem)
 	if (errors != 0U)
 	{
 		osPortExitCritical(irqState);
-		osPortBlockingFault(errors, OS_BLOCK_OPERATION_SEMAPHORE, caller);
+		osPortBlockingFault(errors, operation, caller);
 	}
 
 	/* Record the wait relationship while kernel state is protected. */
@@ -99,27 +102,42 @@ void osBinSemTake(osBinSem *sem)
 	osPortExitCritical(irqState);
 }
 
+void osBinSemTake(osBinSem *sem)
+{
+	takeSignal(sem, OS_BLOCK_OPERATION_SEMAPHORE);
+}
+
 /*-----------------------------------------------------------
- * osBinSemGive
+ * giveSignal
  *
- * Releases a binary semaphore inside a protected critical
+ * Releases one signal inside a protected critical
  * section. When a waiter exists, the signal is handed directly
  * to exactly one blocked thread and the stored semaphore value
- * remains zero. Without a waiter, the signal is stored as one.
- * Repeated gives therefore coalesce instead of growing a count.
+ * remains zero. Without a waiter, store one token up to limit.
+ * Binary calls coalesce at capacity; counting calls report false.
  *
  * A context switch is requested only for direct handoff so the
  * newly readied thread can participate in scheduling promptly.
  *----------------------------------------------------------*/
-void osBinSemGive(osBinSem *sem)
+static bool giveSignal(osSemaphoreCore *sem, uint32_t limit, bool coalesce)
 {
 	osIrqState irqState = osPortEnterCritical();
 	bool waiterUnblocked = osKernelUnblockOneOnSemaphore(sem);
+	bool accepted = true;
 
 	if (!waiterUnblocked)
 	{
-		/* A binary semaphore stores at most one pending signal. */
-		sem->value = 1;
+		if ((uint32_t)sem->value < limit)
+		{
+			/* Init bounds limit to INT32_MAX, so this increment cannot
+			 * overflow the signed count in a valid semaphore. */
+			sem->value++;
+		}
+		else
+		{
+			/* Binary gives coalesce; counting gives report capacity. */
+			accepted = coalesce;
+		}
 	}
 
 	/* Publish either the stored signal or the direct handoff state. */
@@ -131,4 +149,44 @@ void osBinSemGive(osBinSem *sem)
 		osKernelRequestContextSwitch();
 	}
 	osPortExitCritical(irqState);
+	return accepted;
+}
+
+void osBinSemGive(osBinSem *sem)
+{
+	/* Existing void API and signal-coalescing behavior remain unchanged. */
+	(void)giveSignal(sem, 1U, true);
+}
+
+/*-----------------------------------------------------------
+ * osCountSemInit
+ *
+ * Validate before writing any fields. A rejected initialization must
+ * not turn existing storage into a half-initialized semaphore. Count
+ * storage remains signed for compatibility with the binary core, so
+ * the supported maximum is INT32_MAX rather than UINT32_MAX.
+ *----------------------------------------------------------*/
+bool osCountSemInit(osCountSem *sem, uint32_t maxCount, uint32_t initialCount)
+{
+	if (sem == NULL || maxCount == 0U || maxCount > (uint32_t)INT32_MAX ||
+	    initialCount > maxCount)
+	{
+		return false;
+	}
+	sem->core.value = (int32_t)initialCount;
+	(void)osWaitQueueInit(&sem->core.waiters);
+	sem->maxCount = maxCount;
+	return true;
+}
+
+void osCountSemTake(osCountSem *sem)
+{
+	takeSignal(&sem->core, OS_BLOCK_OPERATION_COUNT_SEMAPHORE);
+}
+
+bool osCountSemGive(osCountSem *sem)
+{
+	/* A blocked waiter receives the new token directly: count stays zero.
+	 * Only a Give with no waiter consumes one slot of stored capacity. */
+	return giveSignal(&sem->core, sem->maxCount, false);
 }
