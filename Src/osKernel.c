@@ -126,6 +126,7 @@ void osThreadStackInit(int i, void (*task)(void))
 	/* Set thread state and clear waiting semaphore pointer */
 	tcbs[i].state = THREAD_READY;
 	tcbs[i].waitSem = 0;
+	tcbs[i].waitMutex = 0;
 	/* The TCB owns its node; queue removal preserves this owner pointer. */
 	(void)osWaitNodeInit(&tcbs[i].waitNode, &tcbs[i]);
 }

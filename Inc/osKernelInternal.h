@@ -4,9 +4,18 @@
 #include <stdbool.h>
 
 #include <osSemaphore.h>
+#include "osMutex.h"
 
 /* True only after launch, with a current thread still in the ready state. */
 bool osKernelHasRunnableCaller(void);
+
+/* Opaque identity of the current ready task; callers have validated context. */
+void *osKernelCurrentThreadIdentity(void);
+
+/* Internal mutex transitions. Caller holds the kernel critical section. */
+void osKernelBlockCurrentOnMutex(osMutex *mutex);
+/* Give has checked ownership. Returns true when transferred to a waiter. */
+bool osKernelReleaseMutex(osMutex *mutex);
 
 /*
  * Enqueues the current thread and publishes its blocked state atomically.
