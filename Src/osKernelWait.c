@@ -33,12 +33,18 @@ bool osKernelHasRunnableCaller(void)
 	       (currentPt->state == THREAD_READY);
 }
 
+void *osKernelCurrentThreadIdentity(void)
+{
+	return osKernelHasRunnableCaller() ? currentPt : NULL;
+}
+
 /* Caller holds the kernel critical section from semaphore Take.
  * Validate the task and queue before changing state. Duplicate insertion
  * fails in Push, preserving both the wait relationship and queue links. */
 void osKernelBlockCurrentOnSemaphore(osSemaphoreCore *sem)
 {
 	if (!osKernelHasRunnableCaller() || currentPt->waitSem != NULL ||
+	    currentPt->waitMutex != NULL ||
 	    currentPt->waitNode.owner != currentPt)
 	{
 		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_ENQUEUE);
@@ -66,7 +72,8 @@ bool osKernelUnblockOneOnSemaphore(osSemaphoreCore *sem)
 	if (node == NULL) return false;
 	tcbType *thread = node->owner;
 	if (!registeredThread(thread) || &thread->waitNode != node ||
-	    thread->state != THREAD_BLOCKED || thread->waitSem != sem)
+	    thread->state != THREAD_BLOCKED || thread->waitSem != sem ||
+	    thread->waitMutex != NULL)
 	{
 		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
 	}
@@ -77,6 +84,64 @@ bool osKernelUnblockOneOnSemaphore(osSemaphoreCore *sem)
 		waitFault(result, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
 	}
 	thread->waitSem = NULL;
+	thread->state = THREAD_READY;
+	return true;
+}
+
+void osKernelBlockCurrentOnMutex(osMutex *mutex)
+{
+	if (!osKernelHasRunnableCaller() || currentPt->waitSem != NULL ||
+	    currentPt->waitMutex != NULL || currentPt->waitNode.owner != currentPt)
+	{
+		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_ENQUEUE);
+	}
+	/* An owned mutex must identify a different initialized task. */
+	if (!registeredThread(mutex->owner) || mutex->owner == currentPt)
+	{
+		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_ENQUEUE);
+	}
+	osWaitResult result = osWaitQueuePush(&mutex->waiters, &currentPt->waitNode);
+	if (result != OS_WAIT_OK)
+	{
+		waitFault(result, OS_BLOCK_OPERATION_WAIT_ENQUEUE);
+	}
+	currentPt->waitMutex = mutex;
+	currentPt->state = THREAD_BLOCKED;
+}
+
+bool osKernelReleaseMutex(osMutex *mutex)
+{
+	if (!osKernelHasRunnableCaller() || mutex->owner != currentPt)
+	{
+		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
+	}
+	osWaitResult result = osWaitQueueValidate(&mutex->waiters);
+	if (result != OS_WAIT_OK)
+	{
+		waitFault(result, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
+	}
+	osWaitNode *node = mutex->waiters.head;
+	if (node == NULL)
+	{
+		mutex->owner = NULL;
+		return false;
+	}
+	tcbType *thread = node->owner;
+	if (!registeredThread(thread) || &thread->waitNode != node ||
+	    thread->state != THREAD_BLOCKED || thread->waitMutex != mutex ||
+	    thread->waitSem != NULL || thread == currentPt)
+	{
+		waitFault(OS_WAIT_CORRUPT, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
+	}
+	osWaitNode *removed;
+	result = osWaitQueuePop(&mutex->waiters, &removed);
+	if (result != OS_WAIT_OK)
+	{
+		waitFault(result, OS_BLOCK_OPERATION_WAIT_DEQUEUE);
+	}
+	/* Transfer BEFORE publishing READY. The waiter resumes as the owner. */
+	mutex->owner = thread;
+	thread->waitMutex = NULL;
 	thread->state = THREAD_READY;
 	return true;
 }

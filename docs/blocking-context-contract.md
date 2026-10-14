@@ -26,9 +26,12 @@ interrupts and loops without returning. Inspect it in the debugger:
 | 3 / 0x08 | Caller FAULTMASK nonzero |
 | 4 / 0x10 | Kernel not running or current task not ready |
 | 5 / 0x20 | Kernel waiter/queue invariant failure |
+| 6 / 0x40 | Non-recursive mutex Take by its existing owner |
 
 `operation` is 1 for semaphore take, 2 for delay, 3 for wait enqueue and 4
-for wait dequeue, and 5 for counting semaphore take. Queue faults also record `osLastWaitQueueResult` using
+for wait dequeue, 5 for counting semaphore Take, 6 for mutex Take and 7
+for mutex Give. Queue faults in kernel wait transitions also record
+`osLastWaitQueueResult` using
 the `osWaitResult` enum. For queue faults, registers are captured inside
 the protected operation, so PRIMASK may represent the internal lock.
 For caller-context faults, `caller` holds the

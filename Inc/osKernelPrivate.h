@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "osSemaphore.h"
+#include "osMutex.h"
 
 #define OS_MAX_THREADS 8U
 _Static_assert(OS_MAX_THREADS <= OS_WAIT_QUEUE_MAX_NODES,
@@ -25,6 +26,7 @@ typedef struct tcb
 	struct tcb *nextPt;
 	enum thread_state state;
 	osSemaphoreCore *waitSem; /* Points to the core of either semaphore type. */
+	osMutex *waitMutex; /* Exactly one wait relationship may be active. */
 	uint32_t wake_at_ms;
 	osWaitNode waitNode; /* One intrusive node per task, shared by future waits. */
 } tcbType;

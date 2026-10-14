@@ -109,3 +109,22 @@ jobs:
             -o build/host-tests/test_counting_semaphore
       - name: Run counting tests
         run: timeout 15s build/host-tests/test_counting_semaphore
+
+  mutex:
+    name: Basic Mutex
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build mutex tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc -Itests/host/fakes \
+            Src/osMutex.c Src/osSemaphore.c Src/osWaitQueue.c Src/osKernelWait.c \
+            tests/host/fakes/fake_os_port.c tests/host/test_mutex.c \
+            -o build/host-tests/test_mutex
+      - name: Run mutex tests
+        run: timeout 15s build/host-tests/test_mutex

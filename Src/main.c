@@ -8,6 +8,7 @@
 #include "osGpio.h"
 #include "osHardwareTest.h"
 #include "osPort.h"
+#include "osMutex.h"
 
 #define QUANTA              2U
 #define PRODUCER_PERIOD_MS  500U
@@ -258,6 +259,103 @@ static void countingProducer(void)
 	}
 }
 
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
+
+static osMutex testMutex;
+volatile uint32_t mutexSharedValue;
+volatile uint32_t mutexWritesA;
+volatile uint32_t mutexWritesB;
+volatile uint32_t mutexActiveWorker;
+volatile uint32_t mutexFailures;
+volatile uint32_t mutexRejectedGives;
+
+static void mutexWorker(uint32_t id)
+{
+	while (1)
+	{
+		osMutexTake(&testMutex);
+		/* Deliberately sleep while owning the mutex to force the other
+		 * worker to block. This is a diagnostic, not recommended lock usage. */
+		if (mutexActiveWorker != 0U) mutexFailures++;
+		mutexActiveWorker = id;
+		uint32_t before = mutexSharedValue;
+		osDelay(10U);
+		if (mutexActiveWorker != id) mutexFailures++;
+		mutexSharedValue = before + 1U;
+		if (id == 1U) mutexWritesA++;
+		else mutexWritesB++;
+		mutexActiveWorker = 0U;
+		if (!osMutexGive(&testMutex)) mutexFailures++;
+		/* Immediate retake must not steal ownership reserved for a waiter. */
+	}
+}
+
+static void mutexTaskA(void) { mutexWorker(1U); }
+static void mutexTaskB(void) { mutexWorker(2U); }
+
+static bool mutexRejectForeignGive(void)
+{
+	uint32_t start = osTimeMs;
+	while ((uint32_t)(osTimeMs - start) < 100U)
+	{
+		osIrqState irqState = osPortEnterCritical();
+		if (mutexActiveWorker != 0U)
+		{
+			/* A worker still holds the mutex. Under this snapshot lock it
+			 * cannot release between the observation and the foreign Give. */
+			bool released = osMutexGive(&testMutex);
+			if (released) mutexFailures++;
+			else mutexRejectedGives++;
+			osPortExitCritical(irqState);
+			return !released;
+		}
+		osPortExitCritical(irqState);
+		osYield();
+	}
+	mutexFailures++;
+	return false;
+}
+
+static void mutexReporter(void)
+{
+	uint32_t previousA = 0U;
+	uint32_t previousB = 0U;
+	uint32_t reports = 0U;
+	while (1)
+	{
+		osDelay(1000U);
+		bool rejected = mutexRejectForeignGive();
+		osMutexTake(&testMutex);
+		/* The reporter also acquires before reading the protected data.
+		 * Copy before releasing; UART runs outside the mutex afterward. */
+		uint32_t shared = mutexSharedValue;
+		uint32_t a = mutexWritesA;
+		uint32_t b = mutexWritesB;
+		uint32_t passed = rejected && mutexActiveWorker == 0U &&
+		                  shared == a + b && a - previousA != 0U &&
+		                  b - previousB != 0U && mutexFailures == 0U;
+		if (!passed) mutexFailures++;
+		uint32_t failures = mutexFailures;
+		uint32_t foreignGives = mutexRejectedGives;
+		if (!osMutexGive(&testMutex))
+		{
+			mutexFailures++;
+			passed = 0U;
+			failures = mutexFailures;
+		}
+		printf("MUTEX %s shared=%lu A=%lu B=%lu rejected=%lu failures=%lu "
+		       "time=%lu ms\r\n", passed ? "PASS" : "FAIL",
+		       (unsigned long)shared, (unsigned long)a, (unsigned long)b,
+		       (unsigned long)foreignGives, (unsigned long)failures,
+		       (unsigned long)osTimeMs);
+		previousA = a;
+		previousB = b;
+		reports++;
+		if (reports & 1U) PIN_SET(5);
+		else PIN_RESET(5);
+	}
+}
+
 #else
 
 /*
@@ -405,6 +503,8 @@ int main(void)
 		printf("COUNT FAIL: semaphore initialization rejected.\r\n");
 		while (1) __WFI();
 	}
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
+	osMutexInit(&testMutex);
 #endif
 
 	/* Initialize the kernel and its idle thread. */
@@ -420,6 +520,9 @@ int main(void)
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
 	uint32_t created = osCreateThread(countingConsumer) &&
 	                   osCreateThread(countingProducer);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
+	uint32_t created = osCreateThread(mutexTaskA) && osCreateThread(mutexTaskB) &&
+	                   osCreateThread(mutexReporter);
 #else
 	uint32_t created = osCreateThread(testTaskA) &&
 	                   osCreateThread(testTaskB) &&
@@ -440,6 +543,8 @@ int main(void)
 	printf("Semaphore FIFO test: created A,B,C; expected wake 2,0,1 repeatedly.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_COUNTING_SEMAPHORE
 	printf("Counting semaphore test: capacity=3, burst=5, then direct handoff.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
+	printf("Basic mutex test: two contending workers and owner-only Give.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_PREEMPTION
 	printf("PendSV preemption test: busy tasks, no yield or delay.\r\n");
 #else

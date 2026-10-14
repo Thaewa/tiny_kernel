@@ -19,6 +19,7 @@ systems.
 - Idle thread using `WFI`
 - Binary semaphore
 - Counting semaphore with bounded capacity and FIFO handoff
+- Non-recursive mutex with owner-only release and FIFO ownership handoff
 - Basic critical sections
 
 ## Current Status
@@ -35,6 +36,10 @@ host coverage and the multi-waiter hardware diagnostic.
 
 The [counting semaphore](docs/counting-semaphore.md) shares that wait
 machinery and reports Give overflow when its stored count is full.
+
+The [basic mutex](docs/basic-mutex.md) tracks its owning task, rejects
+wrong-owner release and detects self-Take. Priority inheritance is not
+implemented; hardware verification uses diagnostic mode 5.
 
 ## Target Hardware
 
@@ -116,6 +121,10 @@ void osBinSemGive(osBinSem *sem);
 bool osCountSemInit(osCountSem *sem, uint32_t maxCount, uint32_t initialCount);
 void osCountSemTake(osCountSem *sem);
 bool osCountSemGive(osCountSem *sem);
+
+void osMutexInit(osMutex *mutex);
+void osMutexTake(osMutex *mutex);
+bool osMutexGive(osMutex *mutex);
 ```
 
 ## Roadmap
@@ -126,7 +135,6 @@ The next planned milestones are:
 - Define kernel API contracts and error handling
 - Introduce reusable wait queues and blocking primitives
 - Separate synchronization code from the kernel core
-- Add mutex ownership and misuse detection
 - Add priority-based scheduling
 - Add priority inheritance for mutexes
 - Add message queues and event flags
@@ -136,6 +144,7 @@ The next planned milestones are:
 
 - Synchronization edge cases have not yet been fully tested
 - No task priorities or priority inheritance
+- No recursive mutex, mutex timeout or general deadlock detection
 - No semaphore timeout
 - No dynamic task creation after the kernel starts has been validated
 - No stack overflow detection
