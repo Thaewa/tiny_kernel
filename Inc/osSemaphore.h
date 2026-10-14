@@ -2,6 +2,7 @@
 #define OS_SEMAPHORE_H
 
 #include <stdint.h>
+#include "osWaitQueue.h"
 
 /*-----------------------------------------------------------
  * osBinSem
@@ -14,9 +15,10 @@
 typedef struct
 {
 	volatile int32_t value; /* Zero: unavailable, one: available. */
+	osWaitQueue waiters;    /* FIFO order is local to this semaphore. */
 } osBinSem;
 
-/* Initializes a binary semaphore before the scheduler starts. */
+/* Initializes before use. Never reinitialize while tasks are waiting. */
 void osBinSemInit(osBinSem *sem, int32_t initial);
 
 /* Takes a semaphore or blocks the calling thread until it is given. */

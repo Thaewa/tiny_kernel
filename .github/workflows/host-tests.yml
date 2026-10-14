@@ -35,6 +35,7 @@ jobs:
             -IInc \
             -Itests/host/fakes \
             Src/osSemaphore.c \
+            Src/osWaitQueue.c \
             tests/host/fakes/fake_os_kernel.c \
             tests/host/fakes/fake_os_port.c \
             tests/host/test_binary_semaphore.c \
@@ -66,3 +67,25 @@ jobs:
       # Bound execution so a regression cannot hang forever in a cycle.
       - name: Run wait queue tests
         run: timeout 15s build/host-tests/test_wait_queue
+
+  semaphore-fifo:
+    name: Semaphore FIFO Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # Real semaphore, queue and kernel wait transitions; only IRQ and
+      # context dispatch are replaced. No fake block/unblock implementation.
+      - name: Build integration tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc -Itests/host/fakes \
+            Src/osSemaphore.c Src/osWaitQueue.c Src/osKernelWait.c \
+            tests/host/fakes/fake_os_port.c \
+            tests/host/test_semaphore_fifo.c \
+            -o build/host-tests/test_semaphore_fifo
+      - name: Run integration tests
+        run: timeout 15s build/host-tests/test_semaphore_fifo

@@ -9,14 +9,14 @@
 bool osKernelHasRunnableCaller(void);
 
 /*
- * Marks the current thread as blocked on the supplied semaphore.
- * This is an internal service used by the synchronization subsystem.
+ * Enqueues the current thread and publishes its blocked state atomically.
+ * Caller must hold the kernel critical section.
  */
 void osKernelBlockCurrentOnSemaphore(osBinSem *sem);
 
 /*
- * Wakes one thread waiting on the supplied semaphore.
- * Returns true when a matching waiter was made ready.
+ * Removes the oldest waiter and makes it ready. Caller holds the critical
+ * section. Returns false only for an empty queue; corruption is fatal.
  */
 bool osKernelUnblockOneOnSemaphore(osBinSem *sem);
 

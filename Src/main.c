@@ -80,6 +80,92 @@ static void producerTask(void)
 	}
 }
 
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
+
+/*
+ * Hardware integration: create A,B,C but stagger the FIRST wait to C,A,B.
+ * Subsequent immediate rewaits preserve rotation. Only the producer prints;
+ * one outstanding Give at a time makes observed execution identify the
+ * selected waiter, rather than confusing FIFO wake selection with the
+ * separate round-robin ordering of several simultaneously ready tasks.
+ */
+static osBinSem fifoSem;
+volatile uint32_t fifoWakeCount;
+volatile uint32_t fifoLastWake;
+volatile uint32_t fifoGiveCount;
+volatile uint32_t fifoFailures;
+
+static void fifoWaiter(uint32_t id, uint32_t initialDelay)
+{
+	osDelay(initialDelay);
+	while (1)
+	{
+		osBinSemTake(&fifoSem);
+		osIrqState irqState = osPortEnterCritical();
+		fifoLastWake = id;
+		fifoWakeCount++;
+		osPortMemoryBarrier();
+		osPortExitCritical(irqState);
+		/* Reuse the same TCB node. It must have been detached by Give. */
+	}
+}
+
+static void fifoTaskA(void) { fifoWaiter(0U, 50U); }
+static void fifoTaskB(void) { fifoWaiter(1U, 100U); }
+static void fifoTaskC(void) { fifoWaiter(2U, 0U); }
+
+static uint32_t fifoWaiterCount(void)
+{
+	/* This diagnostic deliberately inspects queue internals under a lock. */
+	osIrqState irqState = osPortEnterCritical();
+	uint32_t count = fifoSem.waiters.count;
+	osPortExitCritical(irqState);
+	return count;
+}
+
+static void fifoProducer(void)
+{
+	const uint32_t expectedOrder[3] = {2U, 0U, 1U};
+	while (1)
+	{
+		/* Wait for all three nodes, including the previous winner's rewait.
+		 * A timeout reports a missing waiter instead of hanging silently. */
+		uint32_t start = osTimeMs;
+		while (fifoWaiterCount() != 3U && (uint32_t)(osTimeMs - start) < 3000U)
+		{
+			osDelay(1U);
+		}
+		if (fifoWaiterCount() != 3U)
+		{
+			fifoFailures++;
+			printf("FIFO FAIL: waiters=%lu expected=3 failures=%lu\r\n",
+			       (unsigned long)fifoWaiterCount(), (unsigned long)fifoFailures);
+			/* Preserve the failed observation; reset to restart this test. */
+			while (1) osDelay(1000U);
+		}
+
+		osDelay(500U);
+		uint32_t expected = expectedOrder[fifoGiveCount % 3U];
+		uint32_t before = fifoWakeCount;
+		osBinSemGive(&fifoSem);
+		fifoGiveCount++;
+		start = osTimeMs;
+		while (fifoWakeCount == before && (uint32_t)(osTimeMs - start) < 100U)
+		{
+			osDelay(1U);
+		}
+		uint32_t passed = (fifoWakeCount == before + 1U) &&
+		                  (fifoLastWake == expected) && (fifoSem.value == 0);
+		if (!passed) fifoFailures++;
+		printf("FIFO %s give=%lu wake=%lu expected=%lu failures=%lu time=%lu ms\r\n",
+		       passed ? "PASS" : "FAIL", (unsigned long)fifoGiveCount,
+		       (unsigned long)fifoLastWake, (unsigned long)expected,
+		       (unsigned long)fifoFailures, (unsigned long)osTimeMs);
+		if (fifoGiveCount & 1U) PIN_SET(5);
+		else PIN_RESET(5);
+	}
+}
+
 #else
 
 /*
@@ -218,6 +304,8 @@ int main(void)
 #if OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE
 	/* Start unavailable so the first consumer Take must block. */
 	osBinSemInit(&eventSem, 0);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
+	osBinSemInit(&fifoSem, 0);
 #endif
 
 	/* Initialize the kernel and its idle thread. */
@@ -227,6 +315,9 @@ int main(void)
 #if OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE
 	uint32_t created = osCreateThread(consumerTask) &&
 	                   osCreateThread(producerTask);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
+	uint32_t created = osCreateThread(fifoTaskA) && osCreateThread(fifoTaskB) &&
+	                   osCreateThread(fifoTaskC) && osCreateThread(fifoProducer);
 #else
 	uint32_t created = osCreateThread(testTaskA) &&
 	                   osCreateThread(testTaskB) &&
@@ -243,6 +334,8 @@ int main(void)
 
 #if OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE
 	printf("Binary semaphore hardware test started.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_SEMAPHORE_FIFO
+	printf("Semaphore FIFO test: created A,B,C; expected wake 2,0,1 repeatedly.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_PREEMPTION
 	printf("PendSV preemption test: busy tasks, no yield or delay.\r\n");
 #else

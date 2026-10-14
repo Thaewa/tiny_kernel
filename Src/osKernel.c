@@ -3,11 +3,12 @@
 #include "osKernel.h"
 #include "osKernelInternal.h"
 #include "osBlocking.h"
+#include "osKernelPrivate.h"
 #include "cmsis_gcc.h"
 
 //#define NUM_OF_THREADS			3
 #define STACKSIZE				400
-#define MAX_THREADS   8
+#define MAX_THREADS OS_MAX_THREADS
 
 #define BUS_FREQ				16000000
 
@@ -27,24 +28,7 @@
 void osSchedulerBootStrap(void);
 void osScheduler(void);
 
-enum thread_state
-{
-	THREAD_READY = 0,
-	THREAD_BLOCKED = 1,
-	THREAD_SLEEPING = 2
-};
-
 uint32_t 	MILLIS_PRESCALER;
-
-typedef struct tcb
-{
-	int32_t *stackPt;
-	struct tcb *nextPt;
-
-	enum thread_state state; /* New */
-	osBinSem *waitSem;        /* New */
-	uint32_t wake_at_ms;
-} tcbType;
 
 tcbType tcbs[MAX_THREADS];
 static int32_t TCB_STACK[MAX_THREADS][STACKSIZE] __attribute__((aligned(8)));
@@ -52,12 +36,7 @@ tcbType *currentPt = 0;
 volatile uint8_t thread_count = 0;
 
 volatile uint32_t osTimeMs = 0;
-static volatile uint32_t kernelRunning;
-
-bool osKernelHasRunnableCaller(void)
-{
-	return kernelRunning && currentPt && (currentPt->state == THREAD_READY);
-}
+volatile uint32_t osKernelRunning;
 
 /*-----------------------------------------------------------
  * thread_exit
@@ -147,6 +126,8 @@ void osThreadStackInit(int i, void (*task)(void))
 	/* Set thread state and clear waiting semaphore pointer */
 	tcbs[i].state = THREAD_READY;
 	tcbs[i].waitSem = 0;
+	/* The TCB owns its node; queue removal preserves this owner pointer. */
+	(void)osWaitNodeInit(&tcbs[i].waitNode, &tcbs[i]);
 }
 
 /*-----------------------------------------------------------
@@ -272,7 +253,7 @@ void osKernelLaunch(uint32_t quanta)
 
 	/*Launch scheduler*/
 	/* Interrupts remain masked until bootstrap selects the first stack. */
-	kernelRunning = 1U;
+	osKernelRunning = 1U;
 	osSchedulerBootStrap();
 }
 
@@ -418,30 +399,6 @@ void osScheduler(void)
 }
 
 /*-----------------------------------------------------------
- * osKernelUnblockOneOnSemaphore
- *
- * Scans the kernel's TCB storage and wakes the first thread
- * blocked on the supplied semaphore. The boolean result lets a
- * synchronization primitive distinguish direct handoff from
- * storing an available signal without inspecting private TCBs.
- *----------------------------------------------------------*/
-bool osKernelUnblockOneOnSemaphore(osBinSem *sem)
-{
-	for(int i = 0; i < thread_count; i++)
-	{
-		if ((tcbs[i].state == THREAD_BLOCKED) &&
-			(tcbs[i].waitSem == sem))
-		{
-			tcbs[i].state = THREAD_READY;
-			tcbs[i].waitSem = 0;
-			return true;
-		}
-	}
-
-	return false;
-}
-
-/*-----------------------------------------------------------
  * tim2_1Khz_interrupt_init
  *
  * Initializes TIM2 to generate a 1 kHz (1 ms period) interrupt.
@@ -472,20 +429,6 @@ void tim2_1Khz_interrupt_init(void)
 
 	/*Enable timer*/
 	TIM2->CR1 =  CR1_CEN;
-}
-
-/*-----------------------------------------------------------
- * osKernelBlockCurrentOnSemaphore
- *
- * Provides the synchronization subsystem with a narrow internal
- * service for blocking the current thread. Keeping TCB access in
- * the kernel prevents semaphore code from depending directly on
- * the scheduler's private data structures.
- *----------------------------------------------------------*/
-void osKernelBlockCurrentOnSemaphore(osBinSem *sem)
-{
-	currentPt->state = THREAD_BLOCKED;
-	currentPt->waitSem = sem;
 }
 
 /*-----------------------------------------------------------

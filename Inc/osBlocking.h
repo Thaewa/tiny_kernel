@@ -10,9 +10,12 @@
 #define OS_BLOCK_ERROR_BASEPRI   (1U << 2)
 #define OS_BLOCK_ERROR_FAULTMASK (1U << 3)
 #define OS_BLOCK_ERROR_NO_TASK   (1U << 4)
+#define OS_BLOCK_ERROR_WAIT_QUEUE (1U << 5)
 
 #define OS_BLOCK_OPERATION_SEMAPHORE 1U
 #define OS_BLOCK_OPERATION_DELAY     2U
+#define OS_BLOCK_OPERATION_WAIT_ENQUEUE 3U
+#define OS_BLOCK_OPERATION_WAIT_DEQUEUE 4U
 
 /*
  * Shared policy for semaphore and delay. Evaluate a caller snapshot taken
