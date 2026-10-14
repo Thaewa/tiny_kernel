@@ -18,6 +18,7 @@ systems.
 - Thread states: ready, blocked, and sleeping
 - Idle thread using `WFI`
 - Binary semaphore
+- Counting semaphore with bounded capacity and FIFO handoff
 - Basic critical sections
 
 ## Current Status
@@ -31,6 +32,9 @@ Each binary semaphore owns a [FIFO wait queue](docs/fifo-wait-queue.md).
 Give selects the oldest waiter rather than scanning TCB creation order.
 See [semaphore FIFO integration](docs/semaphore-fifo-integration.md) for
 host coverage and the multi-waiter hardware diagnostic.
+
+The [counting semaphore](docs/counting-semaphore.md) shares that wait
+machinery and reports Give overflow when its stored count is full.
 
 ## Target Hardware
 
@@ -108,6 +112,10 @@ void osDelay(uint32_t ms);
 void osBinSemInit(osBinSem *sem, int32_t initial);
 void osBinSemTake(osBinSem *sem);
 void osBinSemGive(osBinSem *sem);
+
+bool osCountSemInit(osCountSem *sem, uint32_t maxCount, uint32_t initialCount);
+void osCountSemTake(osCountSem *sem);
+bool osCountSemGive(osCountSem *sem);
 ```
 
 ## Roadmap
@@ -118,7 +126,6 @@ The next planned milestones are:
 - Define kernel API contracts and error handling
 - Introduce reusable wait queues and blocking primitives
 - Separate synchronization code from the kernel core
-- Add counting semaphores
 - Add mutex ownership and misuse detection
 - Add priority-based scheduling
 - Add priority inheritance for mutexes

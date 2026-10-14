@@ -24,7 +24,7 @@ typedef struct tcb
 	int32_t *stackPt; /* Must remain first: PendSV assembly loads offset zero. */
 	struct tcb *nextPt;
 	enum thread_state state;
-	osBinSem *waitSem;
+	osSemaphoreCore *waitSem; /* Points to the core of either semaphore type. */
 	uint32_t wake_at_ms;
 	osWaitNode waitNode; /* One intrusive node per task, shared by future waits. */
 } tcbType;
