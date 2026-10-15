@@ -19,6 +19,13 @@
 # Eclipse workspace metadata (project metadata remains tracked)
 .metadata/
 
+# Per-machine CubeIDE discovery and debugger view state
+/.settings/language.settings.xml
+/.settings/com.st.stm32cube.ide.mcu.sfrview.prefs
+
+# Local debug launches; keep the shared *.launch.example template tracked
+/*.launch
+
 # Editor and operating-system files
 .vscode/
 *.swp

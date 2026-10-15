@@ -70,7 +70,7 @@ Tiny_Kernel/
 ├── .settings/      STM32CubeIDE project settings
 ├── .cproject       Eclipse CDT build configuration
 ├── .project        Eclipse project definition
-├── tiny_kernel.launch
+├── tiny_kernel.launch.example  Shared ST-LINK debug template
 ├── STM32F411RETX_FLASH.ld
 └── STM32F411RETX_RAM.ld
 ```
@@ -84,7 +84,36 @@ version control.
 2. Import the repository as an existing project.
 3. Select the `Debug` configuration.
 4. Build the `tiny_kernel` project.
-5. Use `tiny_kernel.launch` to program and debug the target with ST-LINK.
+5. Create a local `tiny_kernel.launch` from `tiny_kernel.launch.example`
+   using the command below, then refresh the project in CubeIDE.
+6. Use the local launch to program and debug with ST-LINK. Verify that
+   **C/C++ Application** is `Debug/tiny_kernel.elf` in Debug Configurations.
+
+Run this once from the repository root in PowerShell. It preserves an
+existing local launch instead of overwriting your debugger settings:
+
+```powershell
+if (-not (Test-Path -LiteralPath 'tiny_kernel.launch')) {
+    Copy-Item -LiteralPath 'tiny_kernel.launch.example' -Destination 'tiny_kernel.launch'
+}
+```
+
+### Local IDE settings
+
+Root-level `.launch` files, `.settings/language.settings.xml` and SFR view
+state are local files excluded from version control. CubeIDE may update
+them freely without creating Git changes. Existing local settings are kept
+when removing these files from tracking; fresh clones copy the launch
+template and let CubeIDE regenerate compiler discovery settings.
+
+The template keeps the shared ELF, project, SWD and ST-LINK configuration.
+Logging is disabled and no machine-specific log path is included. If you
+enable server logging, choose a local log destination in CubeIDE. To share
+an intentional debugger configuration change, edit the `.launch.example`
+template rather than committing a generated local `.launch` file.
+
+`.project`, `.cproject` and shared editor preferences remain tracked because
+they define the project/build configuration. Do not ignore all of `.settings/`.
 
 The expected debug executable is:
 
