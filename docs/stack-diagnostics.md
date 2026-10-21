@@ -6,11 +6,12 @@
 bool osGetThreadStackUsage(uint8_t threadIndex, osStackUsage *result);
 ```
 
-The kernel still allocates 400 32-bit words (1600 bytes) per task, including
+Legacy creation allocates 400 32-bit words (1600 bytes) per task, including
 idle. The first eight words at the low-address end carry a distinct canary
 pattern; the remaining 392 words (1568 bytes) form the reported usable
-region. This allocation is unchanged. Task-creation signatures, stack
-switch assembly and the 16-word initial context format are unchanged.
+region. [Static creation](static-thread-stacks.md) can supply a different
+buffer size; the query uses that registered size. Stack switch assembly
+and the 16-word initial context format are unchanged.
 
 Slots are diagnostic storage indexes: idle is zero and user tasks follow
 creation order. `osCreateThread` still returns success/failure, NOT this
@@ -50,7 +51,7 @@ value. A large reserved array may not have been written at all. The estimate
 can therefore understate the deepest SP excursion and is not a guaranteed
 worst-case bound. Keep headroom rather than shrinking to the measured number.
 
-The query disables maskable interrupts while scanning up to 400 words,
+The query disables maskable interrupts while scanning the registered buffer,
 restoring the original mask afterward. It is a diagnostic operation, not a
 constant-time scheduler operation. NMI/HardFault are outside this protection.
 The portable helper assumes accessible initialized storage and serialized
@@ -71,7 +72,9 @@ The host `Stack Diagnostics` job checks paint boundaries, accounting,
 untouched gaps, persistent writes after simulated unwind, full usage,
 individual canary corruption, initial-frame usage, fill-pattern ambiguity
 and argument handling with strict warnings, NDEBUG and sanitizers. It tests
-the portable helper, not Cortex-M stack dispatch or the query adapter.
+the portable helper, not Cortex-M stack dispatch. The separate Static Thread
+Creation job covers registration, frame construction and the query adapter
+with a fake IRQ port; hardware dispatch still requires board testing.
 
 On hardware select `OS_HW_TEST_STACK_DIAGNOSTICS` in Inc/osHardwareTest.h
 (or compiler symbol OS_HARDWARE_TEST_MODE=6, not both). Refresh, clean,

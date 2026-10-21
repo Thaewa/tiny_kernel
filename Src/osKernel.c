@@ -6,13 +6,7 @@
 #include "osKernelPrivate.h"
 #include "cmsis_gcc.h"
 
-//#define NUM_OF_THREADS			3
-#define STACKSIZE				400
-#define STACK_GUARD_WORDS 8U
 #define MAX_THREADS OS_MAX_THREADS
-
-_Static_assert(STACKSIZE >= STACK_GUARD_WORDS + 16U,
-               "Stack must fit low guard and initial integer context");
 
 #define BUS_FREQ				16000000
 
@@ -35,29 +29,18 @@ void osScheduler(void);
 uint32_t 	MILLIS_PRESCALER;
 
 tcbType tcbs[MAX_THREADS];
-static int32_t TCB_STACK[MAX_THREADS][STACKSIZE] __attribute__((aligned(8)));
 tcbType *currentPt = 0;
 volatile uint8_t thread_count = 0;
 
 volatile uint32_t osTimeMs = 0;
 volatile uint32_t osKernelRunning;
 
-/*-----------------------------------------------------------
- * thread_exit
- *
- * Stub function to handle task return.
- * Prevents a task from exiting by looping indefinitely
- * and entering low-power mode (Wait For Interrupt).
- *----------------------------------------------------------*/
-static void thread_exit(void)
+/* Returning is not deletion: keep the task/stack alive as before. */
+void osThreadExit(void)
 {
-    /* Prevent task from returning */
-    while (1)
-    {
-    	/* Wait for interrupt (low power idle loop) */
-    	__WFI();
-    }
+	for (;;) __WFI();
 }
+
 /*-----------------------------------------------------------
  * osWakeSleeping
  *
@@ -95,116 +78,6 @@ void osKernelTick(void)
     osWakeSleeping();
 }
 
-/*-----------------------------------------------------------
- * osThreadStackInit
- *
- * Initializes the stack for a new thread.
- * Sets up both hardware-saved and software-saved contexts
- * so the thread can start execution properly when scheduled.
- *----------------------------------------------------------*/
-void osThreadStackInit(int i, void (*task)(void))
-{
-	/* Corresponding signed/unsigned word types may alias in C. Paint the
-	 * unused region before installing the existing 16-word context frame. */
-	(void)osStackInitialize((uint32_t *)TCB_STACK[i], STACKSIZE, STACK_GUARD_WORDS);
-
-	/* Initialize stack pointer (top of stack frame) */
-	tcbs[i].stackPt =  &TCB_STACK[i][STACKSIZE - 16]; /*Stack Pointer*/
-
-	/* Hardware-saved frame: [R0,R1,R2,R3,R12,LR,PC,xPSR] */
-	TCB_STACK[i][STACKSIZE-1]   = (1U<<24);                /* xPSR: T-bit : Thumb mode */
-	TCB_STACK[i][STACKSIZE-2]   = (int32_t)(task);         /* PC */
-	TCB_STACK[i][STACKSIZE-3]   = (int32_t)thread_exit;    /*R14 i.e LR*/
-	TCB_STACK[i][STACKSIZE-4]   = 0xDEADBEEF;              /*R12*/
-	TCB_STACK[i][STACKSIZE-5]   = 0xDEADBEEF;              /*R3*/
-	TCB_STACK[i][STACKSIZE-6]   = 0xDEADBEEF;              /*R2*/
-	TCB_STACK[i][STACKSIZE-7]   = 0xDEADBEEF;              /*R1*/
-	TCB_STACK[i][STACKSIZE-8]   = 0xDEADBEEF;              /*R0*/
-
-	/* Software-saved frame: [R4..R11] */
-	TCB_STACK[i][STACKSIZE-9]   = 0xDEADBEEF;              /*R11*/
-	TCB_STACK[i][STACKSIZE-10]  = 0xDEADBEEF;              /*R10*/
-	TCB_STACK[i][STACKSIZE-11]  = 0xDEADBEEF;              /*R9*/
-	TCB_STACK[i][STACKSIZE-12]  = 0xDEADBEEF;              /*R8*/
-	TCB_STACK[i][STACKSIZE-13]  = 0xDEADBEEF;              /*R7*/
-	TCB_STACK[i][STACKSIZE-14]  = 0xDEADBEEF;              /*R6*/
-	TCB_STACK[i][STACKSIZE-15]  = 0xDEADBEEF;              /*R5*/
-	TCB_STACK[i][STACKSIZE-16]  = 0xDEADBEEF;              /*R4*/
-
-	/* Set thread state and clear waiting semaphore pointer */
-	tcbs[i].state = THREAD_READY;
-	tcbs[i].waitSem = 0;
-	tcbs[i].waitMutex = 0;
-	/* The TCB owns its node; queue removal preserves this owner pointer. */
-	(void)osWaitNodeInit(&tcbs[i].waitNode, &tcbs[i]);
-}
-
-bool osGetThreadStackUsage(uint8_t threadIndex, osStackUsage *result)
-{
-	if (result == NULL || __get_IPSR() != 0U) return false;
-	osIrqState irqState = osPortEnterCritical();
-	if (thread_count > MAX_THREADS || threadIndex >= thread_count ||
-	    threadIndex >= MAX_THREADS)
-	{
-		osPortExitCritical(irqState);
-		return false;
-	}
-	/* Interrupts cannot switch tasks or add maskable ISR frames mid-scan.
-	 * This task's own diagnostic calls are part of its measured footprint. */
-	bool measured = osStackMeasure((const uint32_t *)TCB_STACK[threadIndex],
-	                               STACKSIZE, STACK_GUARD_WORDS, result);
-	osPortExitCritical(irqState);
-	return measured;
-}
-
-/*-----------------------------------------------------------
- * osCreateThread
- *
- * Creates a new thread and links it into the scheduler’s list.
- * Initializes the stack and updates the circular linked list of TCBs.
- * Returns 1 if successful, or 0 if MAX_THREADS is reached.
- *----------------------------------------------------------*/
-uint8_t osCreateThread(void(*task)(void))
-{
-	/* Disable global interrupts to protect critical section */
-	__disable_irq();
-
-	/* Check if maximum number of threads has been reached */
-	if(thread_count >= MAX_THREADS)
-	{
-		/* Re-enable interrupts before returning */
-		__enable_irq();
-		return 0;
-	}
-
-	/* Index of new thread */
-	int idx = thread_count;
-
-	/* Initialize stack and context for this thread */
-	osThreadStackInit(idx, task);
-
-	/* If this is the first thread, point to itself */
-	if(thread_count == 0)
-	{
-		tcbs[0].nextPt = &tcbs[0];
-		currentPt = &tcbs[0];
-	}
-	else
-	{
-		/* Otherwise, link it circularly after the previous thread */
-		tcbs[idx - 1].nextPt = &tcbs[idx];
-		tcbs[idx].nextPt = &tcbs[0];
-	}
-
-	/* Increment total thread count */
-	thread_count++;
-
-	/* Re-enable global interrupts */
-	__enable_irq();
-
-	/* Thread created successfully */
-	return 1;
-}
 
 /*-----------------------------------------------------------
  * idle_task

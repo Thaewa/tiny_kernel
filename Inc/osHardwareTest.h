@@ -4,7 +4,7 @@
 /*
  * Select one application at build time. The normal semaphore demo remains
  * the default. To select a diagnostic in STM32CubeIDE, add the symbol
- * OS_HARDWARE_TEST_MODE=1, 2, 3, 4, 5, or 6 to the compiler's
+ * OS_HARDWARE_TEST_MODE=1, 2, 3, 4, 5, 6, or 7 to the compiler's
  * preprocessor settings, then clean, rebuild, and flash the new ELF.
  * This header also permits a temporary local edit of the default below.
  */
@@ -15,6 +15,7 @@
 #define OS_HW_TEST_COUNTING_SEMAPHORE 4
 #define OS_HW_TEST_MUTEX 5
 #define OS_HW_TEST_STACK_DIAGNOSTICS 6
+#define OS_HW_TEST_STATIC_STACKS 7
 
 /* Mode 3 verifies C,A,B FIFO wake selection with actual blocking tasks. */
 
@@ -26,6 +27,7 @@
 //#define OS_HARDWARE_TEST_MODE OS_HW_TEST_COUNTING_SEMAPHORE
 //#define OS_HARDWARE_TEST_MODE OS_HW_TEST_MUTEX
 //#define OS_HARDWARE_TEST_MODE OS_HW_TEST_STACK_DIAGNOSTICS
+//#define OS_HARDWARE_TEST_MODE OS_HW_TEST_STATIC_STACKS
 #endif
 
 #if (OS_HARDWARE_TEST_MODE != OS_HW_TEST_SEMAPHORE) && \
@@ -34,8 +36,9 @@
     (OS_HARDWARE_TEST_MODE != OS_HW_TEST_SEMAPHORE_FIFO) && \
     (OS_HARDWARE_TEST_MODE != OS_HW_TEST_COUNTING_SEMAPHORE) && \
     (OS_HARDWARE_TEST_MODE != OS_HW_TEST_MUTEX) && \
-    (OS_HARDWARE_TEST_MODE != OS_HW_TEST_STACK_DIAGNOSTICS)
-#error "Unsupported OS_HARDWARE_TEST_MODE: choose 0, 1, 2, 3, 4, 5, or 6"
+    (OS_HARDWARE_TEST_MODE != OS_HW_TEST_STACK_DIAGNOSTICS) && \
+    (OS_HARDWARE_TEST_MODE != OS_HW_TEST_STATIC_STACKS)
+#error "Unsupported OS_HARDWARE_TEST_MODE: choose 0, 1, 2, 3, 4, 5, 6, or 7"
 #endif
 
 #endif /* OS_HARDWARE_TEST_H */

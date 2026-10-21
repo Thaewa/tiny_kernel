@@ -40,4 +40,7 @@ extern volatile uint8_t thread_count;
 extern volatile uint32_t osKernelRunning;
 extern volatile uint32_t osLastWaitQueueResult;
 
+/* Architecture-side terminal stub installed as a new task's return LR. */
+void osThreadExit(void);
+
 #endif /* OS_KERNEL_PRIVATE_H */
