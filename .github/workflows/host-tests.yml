@@ -128,3 +128,39 @@ jobs:
             -o build/host-tests/test_mutex
       - name: Run mutex tests
         run: timeout 15s build/host-tests/test_mutex
+
+  stack-diagnostics:
+    name: Stack Diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build stack tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g -DNDEBUG \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc Src/osStack.c tests/host/test_stack.c \
+            -o build/host-tests/test_stack
+      - name: Run stack tests
+        run: timeout 15s build/host-tests/test_stack
+
+  static-thread:
+    name: Static Thread Creation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build thread creation tests
+        run: |
+          mkdir -p build/host-tests
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic -O2 -g -DNDEBUG \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -IInc -Itests/host/fakes \
+            Src/osKernelThread.c Src/osStack.c Src/osWaitQueue.c \
+            tests/host/fakes/fake_os_port.c tests/host/test_thread.c \
+            -o build/host-tests/test_thread
+      - name: Run thread creation tests
+        run: timeout 15s build/host-tests/test_thread

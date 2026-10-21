@@ -356,6 +356,99 @@ static void mutexReporter(void)
 	}
 }
 
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS || \
+      OS_HARDWARE_TEST_MODE == OS_HW_TEST_STATIC_STACKS
+
+#if OS_HARDWARE_TEST_MODE == OS_HW_TEST_STATIC_STACKS
+/* Lifetime is the entire program, and both base and top are 8-byte aligned.
+ * Deliberate headroom remains above the previous measured footprints. */
+static uint32_t shallowStack[256] __attribute__((aligned(8)));
+static uint32_t deepStack[384] __attribute__((aligned(8)));
+static uint32_t reporterStack[512] __attribute__((aligned(8)));
+static const uint32_t expectedStackWords[] = {400U, 256U, 384U, 512U};
+#else
+static const uint32_t expectedStackWords[] = {400U, 400U, 400U, 400U};
+#endif
+
+volatile uint32_t stackShallowIterations;
+volatile uint32_t stackDeepIterations;
+volatile uint32_t stackProbeChecksum;
+volatile uint32_t stackDiagnosticFailures;
+
+static void stackShallowTask(void)
+{
+	while (1)
+	{
+		stackShallowIterations++;
+		osDelay(10U);
+	}
+}
+
+/* Make the workload's additional stack writes explicit even in optimized
+ * builds. The array remains live across a delay/context switch. */
+__attribute__((noinline)) static void stackDeepProbe(void)
+{
+	volatile uint32_t scratch[64];
+	for (uint32_t i = 0U; i < 64U; i++) scratch[i] = i ^ 0x13579BDFU;
+	osDelay(10U);
+	stackProbeChecksum = scratch[0] ^ scratch[63];
+}
+
+static void stackDeepTask(void)
+{
+	while (1)
+	{
+		stackDeepProbe();
+		stackDeepIterations++;
+	}
+}
+
+static void stackReporter(void)
+{
+	uint32_t previousShallow = 0U;
+	uint32_t previousDeep = 0U;
+	uint32_t reports = 0U;
+	while (1)
+	{
+		osDelay(1000U);
+		bool passed = stackShallowIterations != previousShallow &&
+		              stackDeepIterations != previousDeep && stackProbeChecksum == 63U;
+		/* This mode creates idle=0, shallow=1, deep=2 and reporter=3.
+		 * Slot indexes are diagnostic indexes, not osCreateThread results. */
+		for (uint8_t id = 0U; id < 4U; id++)
+		{
+			osStackUsage usage = {0};
+			bool measured = osGetThreadStackUsage(id, &usage);
+			bool healthy = measured && usage.guardIntact &&
+			               usage.allocatedWords == expectedStackWords[id] &&
+			               usage.minimumFreeWords > 0U &&
+			               usage.allocatedWords == usage.guardWords +
+			                   usage.minimumFreeWords + usage.maximumUsedWords;
+			if (!healthy) stackDiagnosticFailures++;
+			passed = passed && healthy;
+			printf("STACK %s task=%u allocated=%lu guard=%lu free=%lu used=%lu "
+			       "canary=%s failures=%lu\r\n", healthy ? "PASS" : "FAIL",
+			       (unsigned int)id, (unsigned long)usage.allocatedWords,
+			       (unsigned long)usage.guardWords, (unsigned long)usage.minimumFreeWords,
+			       (unsigned long)usage.maximumUsedWords,
+			       usage.guardIntact ? "OK" : "DAMAGED",
+			       (unsigned long)stackDiagnosticFailures);
+		}
+		osStackUsage invalid;
+		if (osGetThreadStackUsage(255U, &invalid)) passed = false;
+		if (!passed) stackDiagnosticFailures++;
+		printf("STACK progress %s shallow=%lu deep=%lu failures=%lu\r\n",
+		       passed && stackDiagnosticFailures == 0U ? "PASS" : "FAIL",
+		       (unsigned long)stackShallowIterations, (unsigned long)stackDeepIterations,
+		       (unsigned long)stackDiagnosticFailures);
+		previousShallow = stackShallowIterations;
+		previousDeep = stackDeepIterations;
+		reports++;
+		if (reports & 1U) PIN_SET(5);
+		else PIN_RESET(5);
+	}
+}
+
 #else
 
 /*
@@ -523,6 +616,17 @@ int main(void)
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
 	uint32_t created = osCreateThread(mutexTaskA) && osCreateThread(mutexTaskB) &&
 	                   osCreateThread(mutexReporter);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS
+	uint32_t created = osCreateThread(stackShallowTask) && osCreateThread(stackDeepTask) &&
+	                   osCreateThread(stackReporter);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STATIC_STACKS
+	uint32_t created = osCreateThreadStatic(stackShallowTask, shallowStack, 256U) &&
+	                   osCreateThreadStatic(stackDeepTask, deepStack, 384U) &&
+	                   osCreateThreadStatic(stackReporter, reporterStack, 512U);
+	/* A duplicate must fail before repainting the already-installed context.
+	 * The reporter then checks that the original stack still runs normally. */
+	if (created && osCreateThreadStatic(stackShallowTask, shallowStack, 256U))
+		created = 0U;
 #else
 	uint32_t created = osCreateThread(testTaskA) &&
 	                   osCreateThread(testTaskB) &&
@@ -545,6 +649,10 @@ int main(void)
 	printf("Counting semaphore test: capacity=3, burst=5, then direct handoff.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
 	printf("Basic mutex test: two contending workers and owner-only Give.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS
+	printf("Stack diagnostics: words=400 guard=8; idle=0 shallow=1 deep=2 reporter=3.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STATIC_STACKS
+	printf("Static stacks: words=400,256,384,512 guard=8; duplicate rejected.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_PREEMPTION
 	printf("PendSV preemption test: busy tasks, no yield or delay.\r\n");
 #else

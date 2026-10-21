@@ -13,6 +13,8 @@ systems.
 - Preemptive round-robin scheduling
 - Up to eight threads
 - Separate stack for each thread
+- Caller-provided static stacks with per-thread sizes (startup only)
+- On-demand stack usage estimates and sampled canaries
 - Configurable scheduling time quantum
 - Millisecond task delay
 - Thread states: ready, blocked, and sleeping
@@ -40,6 +42,16 @@ machinery and reports Give overflow when its stored count is full.
 The [basic mutex](docs/basic-mutex.md) tracks its owning task, rejects
 wrong-owner release and detects self-Take. Priority inheritance is not
 implemented; hardware verification uses diagnostic mode 5.
+
+[Stack diagnostics](docs/stack-diagnostics.md) report painted high-water
+usage and low-end canary state. Legacy creation uses 400 words per
+thread; diagnostic mode 6 compares shallow and deeper workloads. Canary
+checks are sampled, not automatic overflow protection.
+
+[Static thread stacks](docs/static-thread-stacks.md) let callers choose
+separate buffer sizes without changing the old API. Diagnostic mode 7
+tests mixed sizes. The legacy pool remains reserved, so this feature does
+not yet reduce that pool's RAM usage. Both creation APIs are startup-only.
 
 ## Target Hardware
 
@@ -139,6 +151,8 @@ The public kernel API currently includes:
 ```c
 void osInit(void);
 uint8_t osCreateThread(void (*task)(void));
+uint8_t osCreateThreadStatic(void (*task)(void), uint32_t *stack, uint32_t stackWords);
+bool osGetThreadStackUsage(uint8_t threadIndex, osStackUsage *result);
 void osKernelLaunch(uint32_t quanta);
 void osYield(void);
 void osDelay(uint32_t ms);
@@ -160,14 +174,12 @@ bool osMutexGive(osMutex *mutex);
 
 The next planned milestones are:
 
-- Add repeatable tests for binary semaphore behavior
-- Define kernel API contracts and error handling
-- Introduce reusable wait queues and blocking primitives
-- Separate synchronization code from the kernel core
+- Extend kernel API contracts and error handling
+- Make the legacy stack pool optional to reduce static RAM usage
+- Add automatic stack checks and improve portability
 - Add priority-based scheduling
 - Add priority inheritance for mutexes
 - Add message queues and event flags
-- Improve stack diagnostics and portability
 
 ## Limitations
 
@@ -175,8 +187,9 @@ The next planned milestones are:
 - No task priorities or priority inheritance
 - No recursive mutex, mutex timeout or general deadlock detection
 - No semaphore timeout
-- No dynamic task creation after the kernel starts has been validated
-- No stack overflow detection
+- Task creation is rejected after the kernel starts
+- No automatic stack overflow trapping or memory protection
+- Stack painting estimates writes, not a guaranteed worst-case stack bound
 - No floating-point task context preservation
 - Blocking calls require scheduling to be unmasked; invalid take/delay calls
   stop with debugger diagnostics (see [contract](docs/blocking-context-contract.md))

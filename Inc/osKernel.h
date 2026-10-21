@@ -2,6 +2,7 @@
 #define __OSKERNEL_H__
 #include <stdint.h>
 #include <osSemaphore.h>
+#include "osThread.h"
 #include "stm32f4xx.h"
 
 #define PERIOD 100   /*Period is 100*quanta, e.g. quanta =10-> 100*10 = 1000*/
@@ -12,7 +13,6 @@ void tim2_1Khz_interrupt_init(void);
 
 void osInit(void);
 void osKernelLaunch(uint32_t quanta);
-uint8_t osCreateThread(void(*task)(void));
 void osYield(void);
 void task3(void);
 
