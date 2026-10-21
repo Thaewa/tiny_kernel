@@ -356,6 +356,86 @@ static void mutexReporter(void)
 	}
 }
 
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS
+
+volatile uint32_t stackShallowIterations;
+volatile uint32_t stackDeepIterations;
+volatile uint32_t stackProbeChecksum;
+volatile uint32_t stackDiagnosticFailures;
+
+static void stackShallowTask(void)
+{
+	while (1)
+	{
+		stackShallowIterations++;
+		osDelay(10U);
+	}
+}
+
+/* Make the workload's additional stack writes explicit even in optimized
+ * builds. The array remains live across a delay/context switch. */
+__attribute__((noinline)) static void stackDeepProbe(void)
+{
+	volatile uint32_t scratch[64];
+	for (uint32_t i = 0U; i < 64U; i++) scratch[i] = i ^ 0x13579BDFU;
+	osDelay(10U);
+	stackProbeChecksum = scratch[0] ^ scratch[63];
+}
+
+static void stackDeepTask(void)
+{
+	while (1)
+	{
+		stackDeepProbe();
+		stackDeepIterations++;
+	}
+}
+
+static void stackReporter(void)
+{
+	uint32_t previousShallow = 0U;
+	uint32_t previousDeep = 0U;
+	uint32_t reports = 0U;
+	while (1)
+	{
+		osDelay(1000U);
+		bool passed = stackShallowIterations != previousShallow &&
+		              stackDeepIterations != previousDeep && stackProbeChecksum == 63U;
+		/* This mode creates idle=0, shallow=1, deep=2 and reporter=3.
+		 * Slot indexes are diagnostic indexes, not osCreateThread results. */
+		for (uint8_t id = 0U; id < 4U; id++)
+		{
+			osStackUsage usage = {0};
+			bool measured = osGetThreadStackUsage(id, &usage);
+			bool healthy = measured && usage.guardIntact &&
+			               usage.minimumFreeWords > 0U &&
+			               usage.allocatedWords == usage.guardWords +
+			                   usage.minimumFreeWords + usage.maximumUsedWords;
+			if (!healthy) stackDiagnosticFailures++;
+			passed = passed && healthy;
+			printf("STACK %s task=%u allocated=%lu guard=%lu free=%lu used=%lu "
+			       "canary=%s failures=%lu\r\n", healthy ? "PASS" : "FAIL",
+			       (unsigned int)id, (unsigned long)usage.allocatedWords,
+			       (unsigned long)usage.guardWords, (unsigned long)usage.minimumFreeWords,
+			       (unsigned long)usage.maximumUsedWords,
+			       usage.guardIntact ? "OK" : "DAMAGED",
+			       (unsigned long)stackDiagnosticFailures);
+		}
+		osStackUsage invalid;
+		if (osGetThreadStackUsage(255U, &invalid)) passed = false;
+		if (!passed) stackDiagnosticFailures++;
+		printf("STACK progress %s shallow=%lu deep=%lu failures=%lu\r\n",
+		       passed && stackDiagnosticFailures == 0U ? "PASS" : "FAIL",
+		       (unsigned long)stackShallowIterations, (unsigned long)stackDeepIterations,
+		       (unsigned long)stackDiagnosticFailures);
+		previousShallow = stackShallowIterations;
+		previousDeep = stackDeepIterations;
+		reports++;
+		if (reports & 1U) PIN_SET(5);
+		else PIN_RESET(5);
+	}
+}
+
 #else
 
 /*
@@ -523,6 +603,9 @@ int main(void)
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
 	uint32_t created = osCreateThread(mutexTaskA) && osCreateThread(mutexTaskB) &&
 	                   osCreateThread(mutexReporter);
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS
+	uint32_t created = osCreateThread(stackShallowTask) && osCreateThread(stackDeepTask) &&
+	                   osCreateThread(stackReporter);
 #else
 	uint32_t created = osCreateThread(testTaskA) &&
 	                   osCreateThread(testTaskB) &&
@@ -545,6 +628,8 @@ int main(void)
 	printf("Counting semaphore test: capacity=3, burst=5, then direct handoff.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_MUTEX
 	printf("Basic mutex test: two contending workers and owner-only Give.\r\n");
+#elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_STACK_DIAGNOSTICS
+	printf("Stack diagnostics: words=400 guard=8; idle=0 shallow=1 deep=2 reporter=3.\r\n");
 #elif OS_HARDWARE_TEST_MODE == OS_HW_TEST_PREEMPTION
 	printf("PendSV preemption test: busy tasks, no yield or delay.\r\n");
 #else

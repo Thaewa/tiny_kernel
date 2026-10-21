@@ -8,7 +8,11 @@
 
 //#define NUM_OF_THREADS			3
 #define STACKSIZE				400
+#define STACK_GUARD_WORDS 8U
 #define MAX_THREADS OS_MAX_THREADS
+
+_Static_assert(STACKSIZE >= STACK_GUARD_WORDS + 16U,
+               "Stack must fit low guard and initial integer context");
 
 #define BUS_FREQ				16000000
 
@@ -100,6 +104,10 @@ void osKernelTick(void)
  *----------------------------------------------------------*/
 void osThreadStackInit(int i, void (*task)(void))
 {
+	/* Corresponding signed/unsigned word types may alias in C. Paint the
+	 * unused region before installing the existing 16-word context frame. */
+	(void)osStackInitialize((uint32_t *)TCB_STACK[i], STACKSIZE, STACK_GUARD_WORDS);
+
 	/* Initialize stack pointer (top of stack frame) */
 	tcbs[i].stackPt =  &TCB_STACK[i][STACKSIZE - 16]; /*Stack Pointer*/
 
@@ -129,6 +137,24 @@ void osThreadStackInit(int i, void (*task)(void))
 	tcbs[i].waitMutex = 0;
 	/* The TCB owns its node; queue removal preserves this owner pointer. */
 	(void)osWaitNodeInit(&tcbs[i].waitNode, &tcbs[i]);
+}
+
+bool osGetThreadStackUsage(uint8_t threadIndex, osStackUsage *result)
+{
+	if (result == NULL || __get_IPSR() != 0U) return false;
+	osIrqState irqState = osPortEnterCritical();
+	if (thread_count > MAX_THREADS || threadIndex >= thread_count ||
+	    threadIndex >= MAX_THREADS)
+	{
+		osPortExitCritical(irqState);
+		return false;
+	}
+	/* Interrupts cannot switch tasks or add maskable ISR frames mid-scan.
+	 * This task's own diagnostic calls are part of its measured footprint. */
+	bool measured = osStackMeasure((const uint32_t *)TCB_STACK[threadIndex],
+	                               STACKSIZE, STACK_GUARD_WORDS, result);
+	osPortExitCritical(irqState);
+	return measured;
 }
 
 /*-----------------------------------------------------------
